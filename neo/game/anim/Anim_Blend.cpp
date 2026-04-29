@@ -2619,11 +2619,12 @@ bool idDeclModelDef::Parse( const char *text, const int textLength ) {
 			}
 			filename = token2;
 			filename.ExtractFileExtension( extension );
-			if ( extension != MD5_MESH_EXT ) {
-				src.Warning( "Invalid model for MD5 mesh" );
-				MakeDefault();
-				return false;
-			}
+			//Dynamix FIXME silly
+			//if ( extension != MD5_MESH_EXT || MDR_MESH_EXT) {
+			//	src.Warning( "Invalid model for MD5 mesh" );
+			//	MakeDefault();
+			//	return false;
+			//}
 			modelHandle = renderModelManager->FindModel( filename );
 			if ( !modelHandle ) {
 				src.Warning( "Model '%s' not found", filename.c_str() );
@@ -2642,24 +2643,26 @@ bool idDeclModelDef::Parse( const char *text, const int textLength ) {
 			if ( !num ) {
 				src.Warning( "Model '%s' has no joints", filename.c_str() );
 			}
-
-			// set up the joint hierarchy
-			joints.SetGranularity( 1 );
-			joints.SetNum( num );
-			jointParents.SetNum( num );
-			channelJoints[0].SetNum( num );
-			md5joints = modelHandle->GetJoints();
-			md5joint = md5joints;
-			for( i = 0; i < num; i++, md5joint++ ) {
-				joints[i].channel = ANIMCHANNEL_ALL;
-				joints[i].num = static_cast<jointHandle_t>( i );
-				if ( md5joint->parent ) {
-					joints[i].parentNum = static_cast<jointHandle_t>( md5joint->parent - md5joints );
-				} else {
-					joints[i].parentNum = INVALID_JOINT;
+			if (num > 0) {
+				// set up the joint hierarchy
+				joints.SetGranularity(1);
+				joints.SetNum(num);
+				jointParents.SetNum(num);
+				channelJoints[0].SetNum(num);
+				md5joints = modelHandle->GetJoints();
+				md5joint = md5joints;
+				for (i = 0; i < num; i++, md5joint++) {
+					joints[i].channel = ANIMCHANNEL_ALL;
+					joints[i].num = static_cast<jointHandle_t>(i);
+					if (md5joint->parent) {
+						joints[i].parentNum = static_cast<jointHandle_t>(md5joint->parent - md5joints);
+					}
+					else {
+						joints[i].parentNum = INVALID_JOINT;
+					}
+					jointParents[i] = joints[i].parentNum;
+					channelJoints[0][i] = i;
 				}
-				jointParents[i] = joints[i].parentNum;
-				channelJoints[0][i] = i;
 			}
 		} else if ( token == "remove" ) {
 			// removes any anims whos name matches
@@ -4086,6 +4089,7 @@ void idAnimator::ServiceAnims( int fromtime, int totime ) {
 	}
 
 	if ( modelDef->ModelHandle() ) {
+
 		blend = channels[ 0 ];
 		for( i = 0; i < ANIM_NumAnimChannels; i++ ) {
 			for( j = 0; j < ANIM_MaxAnimsPerChannel; j++, blend++ ) {
@@ -5024,7 +5028,6 @@ idRenderModel *idGameEdit::ANIM_CreateMeshForAnim( idRenderModel *model, const c
 	ANIM_CreateAnimFrame( model, md5anim, ent.numJoints, ent.joints, FRAME2MS( frame ), offset, remove_origin_offset );
 
 	newmodel = model->InstantiateDynamicModel( &ent, NULL, NULL );
-
 	Mem_Free16( ent.joints );
 	ent.joints = NULL;
 

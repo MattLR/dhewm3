@@ -748,7 +748,7 @@ idRenderModel *idRenderModelMD5::InstantiateDynamicModel( const struct renderEnt
 		common->DWarning( "model %s instantiated while purged", Name() );
 		LoadModel();
 	}
-
+	
 	if ( !ent->joints ) {
 		common->Printf( "idRenderModelMD5::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name() );
 		delete cachedModel;

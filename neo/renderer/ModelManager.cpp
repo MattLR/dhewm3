@@ -308,6 +308,15 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 		if ( model->IsDefaultModel() ) {
 			delete model;
 			return NULL;
+		} 
+	} else if (extension.Icmp("mdc") == 0) {
+		model = new idRenderModelMDC;
+		model->InitFromFile(modelName);
+		// DG: no idea why this needs special treatment, but otherwise
+		//     idRenderModelMD3::InstantiateDynamicModel() is called all the time
+		if (model->IsDefaultModel()) {
+			delete model;
+			return NULL;
 		}
 	} else if ( extension.Icmp( "prt" ) == 0  ) {
 		model = new idRenderModelPrt;
@@ -315,7 +324,11 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 	} else if ( extension.Icmp( "liquid" ) == 0  ) {
 		model = new idRenderModelLiquid;
 		model->InitFromFile( modelName );
-	} else {
+	} else if (extension.Icmp("mdr") == 0) {
+		model = new rvmRenderModelMDR;
+		model->InitFromFile(modelName);
+	}
+	else {
 
 		if ( extension.Length() ) {
 			common->Warning( "unknown model type '%s'", canonical.c_str() );

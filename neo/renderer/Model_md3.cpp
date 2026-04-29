@@ -104,8 +104,9 @@ void idRenderModelMD3::InitFromFile( const char *fileName ) {
 	}
 
 	pinmodel = (md3Header_t *)buffer;
-
-	version = LittleInt (pinmodel->version);
+	int ident = LittleInt(pinmodel->ident);
+	version = LittleInt(pinmodel->version);
+	
 	if (version != MD3_VERSION) {
 		fileSystem->FreeFile( buffer );
 		common->Warning( "InitFromFile: %s has wrong version (%i should be %i)",
@@ -250,6 +251,9 @@ idRenderModelMD3::IsDynamicModel
 =================
 */
 dynamicModel_t idRenderModelMD3::IsDynamicModel() const {
+	//if (md3->numFrames == 1) {
+	//return DM_STATIC;
+	//}
 	return DM_CACHED;
 }
 
@@ -319,7 +323,6 @@ idRenderModel *idRenderModelMD3::InstantiateDynamicModel( const struct renderEnt
 	md3Surface_t *	surface;
 	int				frame, oldframe;
 	idRenderModelStatic	*staticModel;
-
 	int numFrames = md3->numFrames;
 
 	// TODO: these need set by an entity
