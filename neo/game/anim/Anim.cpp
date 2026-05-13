@@ -888,16 +888,27 @@ void idMD5Anim::GetSingleFrame( int framenum, idJointQuat *joints, const int *in
 idMD5Anim::CheckModelHierarchy
 ====================
 */
-void idMD5Anim::CheckModelHierarchy( const idRenderModel *model ) const {
+void idMD5Anim::CheckModelHierarchy( idRenderModel *model ) const {
 	int	i;
 	int	jointNum;
 	int	parent;
 
-	if ( jointInfo.Num() != model->NumJoints() ) {
-		gameLocal.Error( "Model '%s' has different # of joints than anim '%s'", model->Name(), name.c_str() );
+	//Dynamix - Add actual handling for this stuff later, need to add a type to rendermodel so I can check if it's md5 or not
+	if (1) {
+
+		for (i = 0; i < jointInfo.Num(); i++) {
+			jointNum = jointInfo[i].nameIndex;
+			idStr name = animationLib.JointName(jointNum);
+			parent = jointInfo[i].parentNum;
+			model->SetJoint(i, parent, name);
+		}
 	}
 
+	if ( jointInfo.Num() != model->NumJoints() ) {
+		gameLocal.Error( "CheckModelHierarchy: Model '%s' has different # of joints than anim '%s'", model->Name(), name.c_str() );
+	}
 	const idMD5Joint *modelJoints = model->GetJoints();
+
 	for( i = 0; i < jointInfo.Num(); i++ ) {
 		jointNum = jointInfo[ i ].nameIndex;
 		if ( modelJoints[ i ].name != animationLib.JointName( jointNum ) ) {
@@ -912,6 +923,7 @@ void idMD5Anim::CheckModelHierarchy( const idRenderModel *model ) const {
 			gameLocal.Error( "Model '%s' has different joint hierarchy than anim '%s'", model->Name(), name.c_str() );
 		}
 	}
+	
 }
 
 /***********************************************************************

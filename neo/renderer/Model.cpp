@@ -511,8 +511,17 @@ int idRenderModelStatic::NumJoints( void ) const {
 idRenderModelStatic::GetJoints
 ================
 */
-const idMD5Joint *idRenderModelStatic::GetJoints( void ) const {
+const idMD5Joint *idRenderModelStatic::GetJoints( void )  const {
 	return NULL;
+}
+
+/*
+================
+idRenderModelStatic::SetJoint
+================
+*/
+void idRenderModelStatic::SetJoint(int j, int k , idStr n) {
+	return;
 }
 
 /*

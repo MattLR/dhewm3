@@ -32,6 +32,8 @@ If you have questions concerning this license or the applicable additional terms
 #include "renderer/RenderWorld.h"
 #include "renderer/Model_local.h"
 #include "renderer/tr_local.h"	// just for R_FreeWorldInteractions and R_CreateWorldInteractions
+#include "renderer/Model_mds.h"
+
 
 #include "renderer/ModelManager.h"
 
@@ -327,8 +329,13 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 	} else if (extension.Icmp("mdr") == 0) {
 		model = new rvmRenderModelMDR;
 		model->InitFromFile(modelName);
-	}
-	else {
+	} else if (extension.Icmp("mds") == 0) {
+		model = new idRenderModelMDS;
+		model->InitFromFile(modelName);
+	} else if (extension.Icmp("mdm") == 0) {
+		model = new idRenderModelMDM;
+		model->InitFromFile(modelName);
+	} else {
 
 		if ( extension.Length() ) {
 			common->Warning( "unknown model type '%s'", canonical.c_str() );

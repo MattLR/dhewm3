@@ -2343,13 +2343,13 @@ void idDeclModelDef::SetupJoints( int *numJoints, idJointMat **jointList, idBoun
 	num = modelHandle->NumJoints();
 
 	if ( !num ) {
-		gameLocal.Error( "model '%s' has no joints", modelHandle->Name() );
+		gameLocal.Error( "SetupJoints: model '%s' has no joints", modelHandle->Name() );
 	}
 
 	// set up initial pose for model (with no pose, model is just a jumbled mess)
 	list = (idJointMat *) Mem_Alloc16( num * sizeof( list[0] ) );
 	pose = GetDefaultPose();
-
+	
 	// convert the joint quaternions to joint matrices
 	SIMDProcessor->ConvertJointQuatsToJointMats( list, pose, joints.Num() );
 
@@ -2702,6 +2702,20 @@ bool idDeclModelDef::Parse( const char *text, const int textLength ) {
 				MakeDefault();
 				return false;
 			}
+			//Dynamix gigahack for testing FIXME
+				md5joint = md5joints;
+				for (i = 0; i < num; i++, md5joint++) {
+					joints[i].channel = ANIMCHANNEL_ALL;
+					joints[i].num = static_cast<jointHandle_t>(i);
+					if (md5joint->parent) {
+						joints[i].parentNum = static_cast<jointHandle_t>(md5joint->parent - md5joints);
+					}
+					else {
+						joints[i].parentNum = INVALID_JOINT;
+					}
+					jointParents[i] = joints[i].parentNum;
+					channelJoints[0][i] = i;
+				}
 		} else if ( token == "offset" ) {
 			if ( !src.Parse1DMatrix( 3, offset.ToFloatPtr() ) ) {
 				src.Warning( "Expected vector following 'offset'" );

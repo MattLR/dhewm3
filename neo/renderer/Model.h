@@ -313,6 +313,10 @@ public:
 	// Writing to and reading from a demo file.
 	virtual void				ReadFromDemoFile( class idDemoFile *f ) = 0;
 	virtual void				WriteToDemoFile( class idDemoFile *f ) = 0;
+
+	//Dynamix
+	virtual void				SetJoint(int index, int parentNum, idStr name) = 0;
+
 };
 
 #endif /* !__MODEL_H__ */

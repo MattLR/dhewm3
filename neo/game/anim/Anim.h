@@ -253,7 +253,7 @@ public:
 	void					DecreaseRefs( void ) const;
 	int						NumRefs( void ) const;
 
-	void					CheckModelHierarchy( const idRenderModel *model ) const;
+	void					CheckModelHierarchy( idRenderModel *model ) const;
 	void					GetInterpolatedFrame( frameBlend_t &frame, idJointQuat *joints, const int *index, int numIndexes ) const;
 	void					GetSingleFrame( int framenum, idJointQuat *joints, const int *index, int numIndexes ) const;
 	int						Length( void ) const;

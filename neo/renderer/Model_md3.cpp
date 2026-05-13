@@ -47,7 +47,7 @@ idRenderModelMD3::~idRenderModelMD3() {
 	srfTriangles_t tri;
 	memset( &tri, 0, sizeof( tri ) );
 
-	for ( int i=0, n=silInfos.Num() ; i < n ; ++i ) {
+	for ( int i = 0, n = silInfos.Num(); i < n; ++i ) {
 		silInfo_t& silInfo = silInfos[i];
 		// Note: Because tri.sil* was allocated by specialized allocators only available
 		//       in tr.trisurf.cpp, they need to be free'd with them as well.

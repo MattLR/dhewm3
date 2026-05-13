@@ -37,7 +37,7 @@ MDR file format
 
 struct mdrWeight_t {
 	int			boneIndex;	// these are indexes into the boneReferences,
-	float		   boneWeight;		// not the global per-frame bone list
+	float		boneWeight;	// not the global per-frame bone list
 	idVec3		offset;
 };
 
@@ -75,7 +75,7 @@ struct mdrSurface_t {
 	int			numBoneReferences;
 	int			ofsBoneReferences;
 
-	int			ofsEnd;		// next surface follows
+	int			ofsEnd;	// next surface follows
 };
 
 struct mdrBone_t {
@@ -83,11 +83,11 @@ struct mdrBone_t {
 };
 
 struct mdrFrame_t {
-	idVec3		bounds[2];		// bounds of all surfaces of all LOD's for this frame
-	idVec3		localOrigin;		// midpoint of bounds, used for sphere cull
-	float		radius;			// dist from localOrigin to corner
+	idVec3		bounds[2]; // bounds of all surfaces of all LOD's for this frame
+	idVec3		localOrigin; // midpoint of bounds, used for sphere cull
+	float		radius; // dist from localOrigin to corner
 	char		name[16];
-	mdrBone_t	bones[1];		// [numBones]
+	mdrBone_t	bones[1]; // [numBones]
 };
 
 struct mdrCompBone_t {
@@ -96,7 +96,7 @@ struct mdrCompBone_t {
 
 struct mdrCompFrame_t {
 	idVec3          bounds[2];		// bounds of all surfaces of all LOD's for this frame
-	idVec3          localOrigin;		// midpoint of bounds, used for sphere cull
+	idVec3          localOrigin;	// midpoint of bounds, used for sphere cull
 	float           radius;			// dist from localOrigin to corner
 	mdrCompBone_t   bones[1];		// [numBones]
 };
@@ -108,8 +108,8 @@ struct mdrLOD_t {
 };
 
 struct mdrTag_t {
-	int                     boneIndex;
-	char            name[32];
+	int			boneIndex;
+	char		name[32];
 };
 
 struct mdrHeader_t {
@@ -121,16 +121,16 @@ struct mdrHeader_t {
 	// frames and bones are shared by all levels of detail
 	int			numFrames;
 	int			numBones;
-	int			ofsFrames;			// mdrFrame_t[numFrames]
+	int			ofsFrames;	// mdrFrame_t[numFrames]
 
 	// each level of detail has completely separate sets of surfaces
 	int			numLODs;
 	int			ofsLODs;
 
-	int                     numTags;
-	int                     ofsTags;
+	int			numTags;
+	int			ofsTags;
 
-	int			ofsEnd;				// end of file
+	int			ofsEnd;	// end of file
 };
 
 /*

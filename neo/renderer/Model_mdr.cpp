@@ -83,6 +83,9 @@ void rvmRenderModelMDR::LoadModel(void) {
 		return;
 	}
 
+	// Convert the anims to md5 if it doesn't exist
+	WriteAnimToDisk();
+
 	// If we don't have any frames, then render as a static mesh.
 	//if (modelData->numFrames == 1)
 	{
@@ -470,6 +473,13 @@ bool rvmRenderModelMDR::LoadMDRFile(void *buffer, int filesize) {
 			joints[i].parent = &joints[0];
 		}
 	}
+
+	common->Printf("Numtags %d", header->numTags);
+	tag = (mdrTag_t*)((byte*)header + header->ofsTags);
+	for (i = 0; i < header->numTags; i++) {
+		common->Printf("Numtags %d, %s\n", tag->boneIndex, tag->name);
+		tag++;
+	}
 	
 	//Defaultpose here for now - Dynamix
 
@@ -521,7 +531,17 @@ idRenderModelMDR::GetJointHandle
 =================
 */
 jointHandle_t rvmRenderModelMDR::GetJointHandle(const char *name) const {
-	return (jointHandle_t)-1;
+	const idMD5Joint* joint;
+	int	i;
+
+	joint = joints.Ptr();
+	for (i = 0; i < joints.Num(); i++, joint++) {
+		if (idStr::Icmp(joint->name.c_str(), name) == 0) {
+			return (jointHandle_t)i;
+		}
+	}
+
+	return INVALID_JOINT;
 }
 
 /*
@@ -748,16 +768,15 @@ void rvmRenderModelMDR::RenderFramesToModel(idRenderModelStatic *staticModel, co
 		//
 		numVerts = surface->numVerts;
 		v = (mdrVertex_t *)((byte *)surface + surface->ofsVerts);
-		for (j = 0; j < numVerts; j++)
-		{
+
+		for (j = 0; j < numVerts; j++) {
 			idVec3	tempVert, tempNormal;
 			mdrWeight_t	*w;
 
 			tempVert.Zero();
 			tempNormal.Zero();
 			w = v->weights;
-			for (k = 0; k < v->numWeights; k++, w++)
-			{
+			for (k = 0; k < v->numWeights; k++, w++) {
 				bone = bonePtr + w->boneIndex;
 
 				tempVert[0] += w->boneWeight * (DotProduct(bone->matrix[0], w->offset) + bone->matrix[0][3]);
@@ -773,7 +792,7 @@ void rvmRenderModelMDR::RenderFramesToModel(idRenderModelStatic *staticModel, co
 			tri->verts[baseVertex + j].xyz[1] = tempVert[1];
 			tri->verts[baseVertex + j].xyz[2] = tempVert[2];
 
-		//	R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
+			//R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
 
 			tri->verts[baseVertex + j].st[0] = v->texCoords[0];
 			tri->verts[baseVertex + j].st[1] = v->texCoords[1];
@@ -859,6 +878,11 @@ idRenderModel *rvmRenderModelMDR::InstantiateDynamicModel(const struct renderEnt
 		cachedModel = NULL;
 	}
 
+	if (purged) {
+		common->DWarning("model %s instantiated while purged", Name());
+		LoadModel();
+	}
+
 	staticModel = new idRenderModelStatic;
 	staticModel->bounds.Clear();
 
@@ -914,4 +938,280 @@ idRenderModelMDR::NearestJoint
 */
 int	rvmRenderModelMDR::NearestJoint(int surfaceNum, int a, int b, int c) const {
 	return 0;
+}
+
+/*
+=================
+idRenderModelMDS::WriteAnimToDisk
+=================
+*/
+bool rvmRenderModelMDR::WriteAnimToDisk() {
+	idFile* fp;
+	int frameSize, numFrames, numAnims, numBones;
+	mdrHeader_t* header;
+	mdrFrame_t* frame;
+
+	idList <animInfo_t> animInfo;
+
+	animInfo.SetGranularity(1);
+	animInfo.SetNum(0);
+	numAnims = 0;
+
+	ParseAnims(animInfo, numAnims);
+	common->Printf("Numanims = %d\n", numAnims);
+
+	//idStr animName = name;
+	//animName.StripFileExtension();
+	//animName.Append(".md5anim");
+
+	//if ( findFile_t test = fileSystem->FindFile(animName, 0) ) {
+	//common->DPrintf("Found anim file %s for MDS model\n", animName.c_str());
+	//return true;
+	//}
+
+	header = (mdrHeader_t*)modelData;
+	numBones = header->numBones;
+	numFrames = header->numFrames;
+
+	frame = frames[0];
+
+	// FIXME - hack to make sure we're not reading the wrong set of anims right now
+	for (int i = numAnims - 1; i > 0 ; i--) {
+		//int startFrame = animInfo[c].animInfo[0];
+		//int numFrames = animInfo[c].animInfo[1];
+		int x = animInfo[i].animInfo[0] + animInfo[i].animInfo[1];
+		if (x > numFrames) {
+			animInfo.RemoveIndex(i);
+		}
+	}
+
+	numAnims = animInfo.Num();
+
+	idList <idJointMat> boneData;
+	boneData.SetGranularity(1);
+	boneData.SetNum(numBones);
+
+	CalcBones(boneData, 0);
+
+	// FIXME  - Add checks for 0/null animations and if so then just make one anim file called main or all or whatever
+	for (int c = 0; c < numAnims; c++) {
+		idStr animName;
+		int startFrame = animInfo[c].animInfo[0];
+		int numFrames = animInfo[c].animInfo[1];
+
+
+		name.ExtractFilePath(animName);
+		animName.Append(animInfo[c].animName);
+		animName.Append(".md5anim");
+
+		common->Printf("Writing %s\n", animName.c_str());
+		fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
+
+		if (!fp) {
+			common->Warning("WriteAnims: Error opening file %s\n", name.c_str());
+			return false;
+		}
+
+		fp->WriteFloatString("MD5Version 10\n\ncommandline \"\"\n");
+
+		fp->WriteFloatString("numFrames %d\n", numFrames);
+		fp->WriteFloatString("numJoints %d\n", numBones);
+		fp->WriteFloatString("frameRate %d\n", animInfo[c].animInfo[3]);
+		fp->WriteFloatString("numAnimatedComponents %d\n\n", numBones * 6);
+
+		fp->WriteFloatString("hierarchy {\n");
+
+		for (int i = 0; i < numBones; i++) {
+			if (i == 0) {
+				fp->WriteFloatString("\t\"origin\" -1 63 0\n");
+			}
+			else {
+				fp->WriteFloatString("\t\"%s\" 0 63 %d\n", joints[i].name.c_str(), i * 6);
+			}
+		}
+
+		fp->WriteFloatString("}\n\n");
+		fp->WriteFloatString("bounds {\n");
+		for (int i = 0, j = startFrame; i < numFrames; i++, j++) {
+			frame = frames[j];
+
+			fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", frame->bounds[0].x, frame->bounds[0].y, frame->bounds[0].z, frame->bounds[1].x, frame->bounds[1].y, frame->bounds[1].z);
+		}
+		fp->WriteFloatString("}\n\n");
+		CalcBones(boneData, 0);
+		fp->WriteFloatString("baseframe {\n");
+		for (int i = 0; i < numBones; i++) {
+			idJointQuat JointQuat = boneData[i].ToJointQuat();
+			idCQuat cQuat = JointQuat.q.ToCQuat();
+			fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+		}
+		fp->WriteFloatString("}\n\n");
+
+		for (int i = 0, j = startFrame; i < numFrames; i++, j++) {
+			CalcBones(boneData, j);
+			fp->WriteFloatString("frame %d {\n", i);
+			for (int k = 0; k < numBones; k++) {
+				idJointQuat JointQuat = boneData[k].ToJointQuat();
+				idCQuat cQuat = JointQuat.q.ToCQuat();
+
+				int newlineCounter = 0;
+				fp->WriteFloatString("%f %f %f %f %f %f\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+			}
+			fp->WriteFloatString("}\n\n");
+		}
+
+		fileSystem->CloseFile(fp);
+	}
+	return false;
+}
+
+/*
+========================
+idRenderModelMDS::CalcBones
+========================
+*/
+void rvmRenderModelMDR::CalcBones(idList<idJointMat>& boneData, int currentFrame) {
+	int numBones;
+	mdrHeader_t* header;
+	mdrFrame_t* frame;
+
+	header = (mdrHeader_t*)modelData;
+	numBones = header->numBones;
+
+	frame = frames[currentFrame];
+
+	for (int i = 0; i < numBones; i++) {
+		idMat3 rotMatrix;
+
+		for (int r = 0; r < 3; r++) {
+			for (int c = 0; c < 3; c++) {
+				rotMatrix[r][c] = frame->bones[i].matrix[c][r];
+			}
+		}
+
+		idVec3 translationVec(frame->bones[i].matrix[0][3], frame->bones[i].matrix[1][3], frame->bones[i].matrix[2][3]);
+
+		boneData[i].SetRotation(rotMatrix);
+		boneData[i].SetTranslation(translationVec);
+	}
+
+	// In Elite Force they just parent everything to the origin bone, but may as well do this anyway 
+	// just in case somebody wants to use it or custom models don't do that or something
+	// Only fine if parent is always earlier in the joint layout
+	// which Doom 3 expects anyway
+	// Untransform the joints to .md5anim format
+	for (int i = numBones - 1; i > 0; i--) {
+		boneData[i] /= boneData[0];
+	}
+}
+
+/*
+========================
+idRenderModelMDS::ParseAnims
+========================
+*/
+void rvmRenderModelMDR::ParseAnims(idList <animInfo_t>& animInfo, int& numAnims) {
+	idFile* fp;
+	idStr animName;
+	idLexer parser(LEXFL_ALLOWPATHNAMES | LEXFL_NOSTRINGESCAPECHARS | LEXFL_NOSTRINGCONCAT);
+	idToken		token;
+	animInfo_t* temp;
+
+	/*
+	animInfo.SetNum(1);
+	animInfo[0].animName = "test";
+	animInfo[0].animInfo[0] = 0;
+	animInfo[0].animInfo[1] = 6;
+	animInfo[0].animInfo[2] = 0;
+	animInfo[0].animInfo[3] = 10;
+	animInfo[0].animInfo[4] = 0;
+	animInfo[0].animInfo[5] = -2;
+	numAnims = 1;
+	return;
+	*/
+
+	name.ExtractFilePath(animName);
+	animName.Append("animation.cfg");
+
+	if (findFile_t test = fileSystem->FindFile(animName, 0)) {
+		common->DPrintf("Found anim file %s for MDR model\n", animName.c_str());
+	}
+
+	parser.LoadFile(animName);
+
+	// EF has two different formats for cfg files, in /player2/ it starts with sex m/f 
+	// and has the anim names commented out after the animinfo ints
+	// In /player/ it starts with commented lines and then goes straight into the anim data 
+	// the anim name is uncommented at the start of the line
+	// Both just end after the final animation, usually with a blank newline
+
+	//FIXME - I need to check the anims are for the upper not the legs - hacked around it in writeanims for now
+	//I'll learn to deal with commented names later, for now we'll just give them an index as a name
+	int type = 0;
+	if (parser.CheckTokenString("sex") ) {
+		parser.SkipRestOfLine();
+		type = 1;
+	 }
+
+	int i = 0;
+	if (type == 0) {
+		while (1) {
+			if ( !parser.ReadToken(&token) ) {
+				numAnims = i;
+				return;
+			}
+			animInfo.SetNum(i + 1);
+			animInfo[i].animName = token;
+
+			//Skipuntilstring skips string and token is the next valid string,  comment lines are skipped entirely
+			animInfo[i].animInfo[0] = parser.ParseInt();
+			animInfo[i].animInfo[1] = parser.ParseInt();
+			animInfo[i].animInfo[2] = parser.ParseInt();
+			animInfo[i].animInfo[3] = parser.ParseInt();
+
+			// I think this never has more than 4, double check
+			animInfo[i].animInfo[4] = -2;
+			animInfo[i].animInfo[5] = -2;
+
+			common->Printf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
+				animInfo[i].animInfo[2], animInfo[i].animInfo[3],
+				animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
+			i++;
+			if ( parser.EndOfFile() ) {
+				numAnims = i;
+				return;
+			}
+		}
+	} else {
+		while (1) {
+			if (!parser.ReadToken(&token)) {
+				numAnims = i;
+				return;
+			}
+			parser.UnreadToken(&token);
+			animInfo.SetNum(i + 1);
+			animInfo[i].animName = va("anim%d", i+1);
+
+			//Skipuntilstring skips string and token is the next valid string,  comment lines are skipped entirely
+			animInfo[i].animInfo[0] = parser.ParseInt();
+			animInfo[i].animInfo[1] = parser.ParseInt();
+			animInfo[i].animInfo[2] = parser.ParseInt();
+			animInfo[i].animInfo[3] = parser.ParseInt();
+
+			// I think this never has more than 4, double check
+			animInfo[i].animInfo[4] = -2;
+			animInfo[i].animInfo[5] = -2;
+
+			common->Printf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
+				animInfo[i].animInfo[2], animInfo[i].animInfo[3],
+				animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
+			i++;
+			if (parser.EndOfFile()) {
+				numAnims = i;
+				return;
+			}
+		}
+	}
+
+	return;
 }

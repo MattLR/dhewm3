@@ -88,6 +88,8 @@ public:
 	virtual void				WriteToDemoFile( class idDemoFile *f );
 	virtual float				DepthHack() const;
 
+	virtual  void				SetJoint(int j, int k, idStr n);
+
 	void						MakeDefaultModel();
 
 	bool						LoadASE( const char *fileName );
@@ -443,6 +445,11 @@ public:
 	virtual	idBounds		Bounds( const struct renderEntity_s *ent ) const;
 };
 
+struct animInfo_t {
+	idStr		animName;
+	int			animInfo[6];	// The 6 int values from wolfanim
+};
+
 /*
 ===============================================================================
 
@@ -472,6 +479,9 @@ public:
 private:
 	bool						LoadMDRFile(void* buffer, int filesize);
 	void						RenderFramesToModel(idRenderModelStatic* staticModel, const struct idRenderEntityParms* ent, const struct viewDef_s* view, const idMaterial* overrideMaterial, int scale, int frame, const renderEntity_t* ent2);
+	bool						WriteAnimToDisk();
+	void						CalcBones(idList<idJointMat>& boneData, int currentFrame);
+	void						ParseAnims(idList <animInfo_t>& animInfo, int& numAnims);
 
 	idList<idMD5Joint>			joints;
 	idList<idJointQuat>			defaultPose;
@@ -532,8 +542,8 @@ MDR file format
 #define	MDR_MAX_BONES	128
 
 struct mdrWeight_t {
-	int			boneIndex;	// these are indexes into the boneReferences,
-	float		   boneWeight;		// not the global per-frame bone list
+	int			boneIndex;		// these are indexes into the boneReferences,
+	float		boneWeight;		// not the global per-frame bone list
 	idVec3		offset;
 };
 

@@ -621,6 +621,7 @@ set(src_renderer
 	renderer/Model_md3.cpp
 	renderer/Model_md5.cpp
 	renderer/Model_mdr.cpp
+	renderer/Model_mds.cpp
 	renderer/Model_prt.cpp
 	renderer/Model_sprite.cpp
 	renderer/RenderEntity.cpp
