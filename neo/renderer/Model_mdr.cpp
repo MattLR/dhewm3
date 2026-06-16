@@ -5,6 +5,7 @@
 #include "framework/Session.h"
 #include "renderer/tr_local.h"
 #include "renderer/Model_local.h"
+#include "renderer/Model_mdr.h"
 
 int		LittleLong(int l) { return l; }
 /*
@@ -303,10 +304,10 @@ bool rvmRenderModelMDR::LoadMDRFile(void *buffer, int filesize) {
 				return false;
 			}
 
-			//Hack to get shader working while I work out what's going on Dynamix
 			char* shaderPtr = (char*)cursurf + 69;
 			// first do some copying stuff
 			strcpy(surf->name, cursurf->name);
+			//strcpy(surf->shader, cursurf->shader);
 			strcpy(surf->shader, shaderPtr);
 
 			surf->ofsHeader = (byte*)mdr - (byte*)surf;
@@ -318,9 +319,11 @@ bool rvmRenderModelMDR::LoadMDRFile(void *buffer, int filesize) {
 			// lowercase the surface name so skin compares are faster
 			strlwr(surf->name);
 
+			// Raven models are missing the first letter for some reason - I'm suring I'm not doing this efficiently but it works
+			// In mdr the string is just one character over and missing the first char,
+			// in glm it's in the right place but has a null first character I think
+	
 			// register the shaders
-			//const char* materialName = va("%s/%s", shaderPrefix.c_str(), surf->shader);
-			//Hack for this missing m thing Dynamix
 			const char* materialName = va("%s%s", "m", surf->shader);
 			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			if (sh != nullptr)
@@ -474,14 +477,20 @@ bool rvmRenderModelMDR::LoadMDRFile(void *buffer, int filesize) {
 		}
 	}
 
-	common->Printf("Numtags %d", header->numTags);
+	//common->DPrintf("Numtags %d\n", header->numTags);
+	/*
 	tag = (mdrTag_t*)((byte*)header + header->ofsTags);
 	for (i = 0; i < header->numTags; i++) {
 		common->Printf("Numtags %d, %s\n", tag->boneIndex, tag->name);
 		tag++;
 	}
-	
+	*/
+
 	//Defaultpose here for now - Dynamix
+
+	// Default pose  = calcbones 0?
+	// Default pose is transformed idjointquats I think
+	// Just make it a sep
 
 	return true;
 }
@@ -535,6 +544,20 @@ jointHandle_t rvmRenderModelMDR::GetJointHandle(const char *name) const {
 	int	i;
 
 	joint = joints.Ptr();
+
+	// Tags are just bones for MDR
+	if (memcmp(name, "tag", 3) == 0) {
+
+		mdrTag_t* tag = (mdrTag_t*)((byte*)modelData + modelData->ofsTags);
+		for (i = 0; i < modelData->numTags; i++) {
+			if (idStr::Icmp(tag->name, name) == 0) {
+				common->DPrintf("Tag %s returns bone %d\n", tag->name, tag->boneIndex);
+				return (jointHandle_t)tag->boneIndex;
+			}
+			tag++;
+		}
+	}
+
 	for (i = 0; i < joints.Num(); i++, joint++) {
 		if (idStr::Icmp(joint->name.c_str(), name) == 0) {
 			return (jointHandle_t)i;
@@ -916,10 +939,10 @@ idRenderModel *rvmRenderModelMDR::InstantiateDynamicModel(const struct renderEnt
 
 /*
 =================
-idRenderModelMDR::GetJointHandle
+idRenderModelMDR::GetJointName
 =================
 */
-const char *		rvmRenderModelMDR::GetJointName(jointHandle_t handle) const {
+const char * rvmRenderModelMDR::GetJointName(jointHandle_t handle) const {
 	return "not_implemented";
 }
 
@@ -942,10 +965,11 @@ int	rvmRenderModelMDR::NearestJoint(int surfaceNum, int a, int b, int c) const {
 
 /*
 =================
-idRenderModelMDS::WriteAnimToDisk
+idRenderModelMDR::WriteAnimToDisk
 =================
 */
 bool rvmRenderModelMDR::WriteAnimToDisk() {
+	//return true;
 	idFile* fp;
 	int frameSize, numFrames, numAnims, numBones;
 	mdrHeader_t* header;
@@ -958,14 +982,14 @@ bool rvmRenderModelMDR::WriteAnimToDisk() {
 	numAnims = 0;
 
 	ParseAnims(animInfo, numAnims);
-	common->Printf("Numanims = %d\n", numAnims);
+	//common->DPrintf("Numanims = %d\n", numAnims);
 
 	//idStr animName = name;
 	//animName.StripFileExtension();
 	//animName.Append(".md5anim");
 
 	//if ( findFile_t test = fileSystem->FindFile(animName, 0) ) {
-	//common->DPrintf("Found anim file %s for MDS model\n", animName.c_str());
+	//common->DPrintf("Found anim file %s for MDR model\n", animName.c_str());
 	//return true;
 	//}
 
@@ -994,15 +1018,27 @@ bool rvmRenderModelMDR::WriteAnimToDisk() {
 	CalcBones(boneData, 0);
 
 	// FIXME  - Add checks for 0/null animations and if so then just make one anim file called main or all or whatever
+	// Checking if file exists to see if we need to generate anim for now, may move to one file check or something in future
 	for (int c = 0; c < numAnims; c++) {
 		idStr animName;
 		int startFrame = animInfo[c].animInfo[0];
 		int numFrames = animInfo[c].animInfo[1];
+		idStr uplow = name;
 
+		// Eliteforce uses the same animcfg for both upper and lower models
+		// Adding a folder so the anims don't overwrite each other
+		uplow.StripPath();
+		uplow.StripFileExtension();
 
 		name.ExtractFilePath(animName);
+		animName.Append(va("%s/", uplow.c_str()));
 		animName.Append(animInfo[c].animName);
 		animName.Append(".md5anim");
+
+		if (findFile_t test = fileSystem->FindFile(animName, 0)) {
+			common->DPrintf("Found file for anim #%d for MDR model, skipping file generation\n", c);
+			continue;
+		}
 
 		common->Printf("Writing %s\n", animName.c_str());
 		fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
@@ -1067,7 +1103,7 @@ bool rvmRenderModelMDR::WriteAnimToDisk() {
 
 /*
 ========================
-idRenderModelMDS::CalcBones
+idRenderModelMDR::CalcBones
 ========================
 */
 void rvmRenderModelMDR::CalcBones(idList<idJointMat>& boneData, int currentFrame) {
@@ -1107,7 +1143,7 @@ void rvmRenderModelMDR::CalcBones(idList<idJointMat>& boneData, int currentFrame
 
 /*
 ========================
-idRenderModelMDS::ParseAnims
+idRenderModelMDR::ParseAnims
 ========================
 */
 void rvmRenderModelMDR::ParseAnims(idList <animInfo_t>& animInfo, int& numAnims) {
@@ -1173,9 +1209,11 @@ void rvmRenderModelMDR::ParseAnims(idList <animInfo_t>& animInfo, int& numAnims)
 			animInfo[i].animInfo[4] = -2;
 			animInfo[i].animInfo[5] = -2;
 
-			common->Printf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
+			/*
+			common->DPrintf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
 				animInfo[i].animInfo[2], animInfo[i].animInfo[3],
 				animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
+			*/
 			i++;
 			if ( parser.EndOfFile() ) {
 				numAnims = i;
@@ -1202,9 +1240,11 @@ void rvmRenderModelMDR::ParseAnims(idList <animInfo_t>& animInfo, int& numAnims)
 			animInfo[i].animInfo[4] = -2;
 			animInfo[i].animInfo[5] = -2;
 
-			common->Printf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
+			/*
+			common->DPrintf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
 				animInfo[i].animInfo[2], animInfo[i].animInfo[3],
 				animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
+			*/
 			i++;
 			if (parser.EndOfFile()) {
 				numAnims = i;
@@ -1214,4 +1254,779 @@ void rvmRenderModelMDR::ParseAnims(idList <animInfo_t>& animInfo, int& numAnims)
 	}
 
 	return;
+}
+
+////////
+// 
+//// MDX (Ghoul 2)
+// 
+////////
+/*
+========================
+idRenderModelMDX::idRenderModelMDX
+========================
+*/
+idRenderModelMDX::idRenderModelMDX() {
+	dataSize = 0;
+	modelData = nullptr;
+	cachedModel = nullptr;
+}
+
+/*
+========================
+idRenderModelMDX::~idRenderModelMDX
+========================
+*/
+idRenderModelMDX::~idRenderModelMDX() {
+	if (modelData) {
+		Mem_Free(modelData);
+		modelData = nullptr;
+	}
+
+	if (cachedModel) {
+		delete cachedModel;
+		cachedModel = nullptr;
+	}
+
+	dataSize = 0;
+}
+
+/*
+========================
+idRenderModelMDX::InitFromFile
+========================
+*/
+void idRenderModelMDX::InitFromFile(const char* fileName) {
+	name = fileName;
+	LoadModel();
+}
+
+/*
+========================
+idRenderModelMDX::LoadModel
+========================
+*/
+void idRenderModelMDX::LoadModel(void) {
+	void* mdxMeshBuffer;
+	int mdxMeshLen;
+
+	if (!purged) {
+		PurgeModel();
+	}
+	purged = false;
+
+	materials.Clear();
+
+	// Try and load the file off disk.
+	mdxMeshLen = fileSystem->ReadFile(name, &mdxMeshBuffer);
+	if (mdxMeshLen <= 0 || mdxMeshBuffer == nullptr)
+	{
+		common->Warning("Failed to load MDM mesh %s\n", name.c_str());
+		MakeDefaultModel();
+		return;
+	}
+
+	// Parse the MDX file.
+
+	if (!LoadMDXFile(mdxMeshBuffer, mdxMeshLen))
+	{
+		MakeDefaultModel();
+		fileSystem->FreeFile(mdxMeshBuffer);
+		return;
+	}
+
+	// If we don't have any frames, then render as a static mesh.
+	//if (modelData->numFrames == 1)
+	//{
+		//viewDef_t view;
+		//RenderFramesToModel(this, &view, 1, 0, NULL);
+
+	//}
+
+	// Free the memory from reading in the ifle.
+	fileSystem->FreeFile(mdxMeshBuffer);
+}
+
+/*
+========================
+idRenderModelMDX::LoadMDXFile
+========================
+*/
+bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
+	int					i, j, k, l;
+	mdxmHeader_t*		pinmodel, * mdxm;
+	mdxmSurfHierarchy_t* surfHeader;
+	mdxmLOD_t*			lod;
+	mdxmSurface_t*		surf;
+	mdxmTriangle_t*		tri;
+	mdxmVertex_t*		v;
+	int					version;
+	int					size;
+	const idMaterial*	sh;
+	int					frameSize;
+	int*				collapseMap, * boneref;
+
+	const char* mod_name = name.c_str();
+	bounds.Clear();
+
+	pinmodel = (mdxmHeader_t*)buffer;
+
+	version = LittleLong(pinmodel->version);
+	if (version != MDXM_VERSION)
+	{
+		common->Warning("R_LoadMDXM: %s has wrong version (%i should be %i)\n", mod_name, pinmodel->version, MDXM_VERSION);
+		return false;
+	}
+
+	size = LittleLong(pinmodel->ofsEnd);
+	//mds = mod->mds = ri.Hunk_Alloc(size, h_low);
+
+	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+
+	if (size > filesize)
+	{
+		common->Warning("R_LoadMDXM: Header of %s is broken. Wrong filesize declared!\n", mod_name);
+		return false;
+	}
+
+	//Fix all this, you can just memcpy and then fix it after
+	LL(pinmodel->numSurfaces);
+
+	dataSize += size;
+	modelData = mdxm = (mdxmHeader_t*)Mem_Alloc(size);
+
+	memcpy(mdxm, buffer, LittleLong(pinmodel->ofsEnd));
+
+	// Copy all the values over from the file and fix endian issues in the process, if necessary.
+
+	mdxm->ident = LittleLong(pinmodel->ident);
+	mdxm->version = pinmodel->version;	// Don't need to swap byte order on this one, we already did above.
+	strcpy(mdxm->name, pinmodel->name);
+	mdxm->numSurfaces = pinmodel->numSurfaces;
+	mdxm->ofsEnd = LittleLong(pinmodel->ofsEnd);
+	mdxm->ofsSurfHierarchy = LittleLong(pinmodel->ofsSurfHierarchy);
+
+	common->Printf("Version %d, name %s, # surfaces %d\n", mdxm->version, mdxm->name, mdxm->numSurfaces);
+
+	surfHeader = (mdxmSurfHierarchy_t*)((byte*)mdxm + mdxm->ofsSurfHierarchy);
+	for (i = 0; i < mdxm->numSurfaces; i++) {
+		LL(surfHeader->flags);
+		LL(surfHeader->numChildren);
+		LL(surfHeader->parentIndex);
+
+		//common->Printf("surfHier name %s, # children %d\n", surfHeader->name, surfHeader->numChildren);
+
+		// Raven models are missing the first letter for some reason - I'm suring I'm not doing this efficiently but it works
+		char* test = surfHeader->shader;
+		if (test[0] == '\0') {
+			// Check following bytes manually
+			if (memcmp(test + 1, "odel", 4) == 0)
+			{
+				test[0] = 'm';
+			} else {
+				//test[0] = '[';
+				test = "textures/common/nodraw";
+			}
+		}
+		strcpy(surfHeader->shader, test);
+
+		// register the shaders
+		//const char* materialName = va("%s%s", "m", surf->shader);
+		const char* materialName = va("%s", surfHeader->shader);
+		common->Printf("Material name %s\n", surfHeader->shader);
+		if (surfHeader->shader[0]) {
+			//sh = R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
+			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
+			if (sh == nullptr) {
+				surfHeader->shaderIndex = 0;
+			} else {
+				surfHeader->shaderIndex = sh->Index();
+			}
+		} else {
+			surfHeader->shaderIndex = 0;
+			common->Warning("Failed to find material %s\n", surfHeader->shader);
+		}
+		materials.Append(sh);
+
+		// Advance to next variable-sized surface
+		surfHeader = (mdxmSurfHierarchy_t*) ( (byte*)surfHeader
+				+ offsetof(mdxmSurfHierarchy_t, childIndexes)
+				+ surfHeader->numChildren * sizeof(int)
+				);
+	}
+
+	lod = (mdxmLOD_t*)((byte*)pinmodel + LittleLong(pinmodel->ofsLODs));
+
+	// swap all the LOD's
+	for (l = 0; l < mdxm->numLODs; l++) {
+		// simple bounds check
+		if ((byte*)(lod + 1) > (byte*)mdxm + size) {
+			common->Warning("R_LoadMDX: %s has broken structure.\n", mod_name);
+			return false;
+		}
+
+		// swap all the surfaces
+		//surf = (mdxmSurface_t*)((byte*)mdxm + mdxm->ofsSurfHierarchy);
+		//surf = (mdxmSurface_t*)((byte*)mdxm + mdxm->ofsLODs + sizeof(mdxmLOD_t));
+		surf = (mdxmSurface_t*)((byte*)lod + sizeof(mdxmLOD_t) + (mdxm->numSurfaces * sizeof(mdxmLODSurfOffset_t)));
+		for (i = 0; i < mdxm->numSurfaces; i++) {
+			if (LittleLong(1) != 1) {
+				LL(surf->ident);
+				LL(surf->thisSurfaceIndex);
+				LL(surf->ofsHeader);
+				LL(surf->numVerts);
+				LL(surf->ofsVerts);
+				LL(surf->numTriangles);
+				LL(surf->ofsTriangles);
+				LL(surf->numBoneReferences);
+				LL(surf->ofsBoneReferences);
+				LL(surf->ofsEnd);
+		}
+
+		//common->Printf("Surf index %d, numverts %d\n", surf->thisSurfaceIndex, surf->numVerts);
+
+		// change to surface identifier
+		surf->ident = 8;
+
+		if (LittleLong(1) != 1) {
+			// swap all the triangles
+			tri = (mdxmTriangle_t*)((byte*)surf + surf->ofsTriangles);
+			for (j = 0; j < surf->numTriangles; j++, tri++) {
+				LL(tri->indexes[0]);
+				LL(tri->indexes[1]);
+				LL(tri->indexes[2]);
+			}
+
+			// swap all the vertexes
+			v = (mdxmVertex_t*)((byte*)surf + surf->ofsVerts);
+			for (j = 0; j < surf->numVerts; j++) {
+				v->normal[0] = LittleFloat(v->normal[0]);
+				v->normal[1] = LittleFloat(v->normal[1]);
+				v->normal[2] = LittleFloat(v->normal[2]);
+
+				v->normal[0] = LittleFloat(v->normal[0]);
+				v->normal[1] = LittleFloat(v->normal[1]);
+				v->normal[2] = LittleFloat(v->normal[2]);
+
+				LL(v->uiNmWeightsAndBoneIndexes);
+				v++;
+			}
+
+			// swap the bone references
+			boneref = (int*)((byte*)surf + surf->ofsBoneReferences);
+			for (j = 0; j < surf->numBoneReferences; j++, boneref++) {
+				*boneref = LittleLong(*boneref);
+			}
+		}
+
+		// find the next surface
+		surf = (mdxmSurface_t*)((byte*)surf + surf->ofsEnd);
+	}
+	lod = (mdxmLOD_t*)((byte*)lod + LittleLong(lod->ofsEnd));
+}
+
+	joints.SetGranularity(1);
+	joints.SetNum(mdxm->numBones);
+	defaultPose.SetGranularity(1);
+	defaultPose.SetNum(mdxm->numBones);
+
+	for (int i = 0; i < mdxm->numBones; i++) {
+		if (i == 0) {
+			joints[i].name = "origin";
+			joints[i].parent = NULL;
+		} else {
+			joints[i].name = va("bone%d", i);
+			joints[i].parent = &joints[0];
+		}
+	}
+
+	return true;
+}
+
+/*
+=================
+idRenderModelMDX::IsDynamicModel
+=================
+*/
+dynamicModel_t idRenderModelMDX::IsDynamicModel() const {
+	return DM_CACHED;
+}
+
+/*
+=================
+idRenderModelMDX::TouchData
+=================
+*/
+void idRenderModelMDX::TouchData() {
+
+}
+
+/*
+=================
+idRenderModelMDX::NumJoints
+=================
+*/
+int	idRenderModelMDX::NumJoints(void) const {
+	return joints.Num();
+	//return modelData->numBones;
+}
+
+/*
+=================
+idRenderModelMDX::GetJoints
+=================
+*/
+const idMD5Joint* idRenderModelMDX::GetJoints(void) const {
+	if (!joints.Num()) {
+		common->Error("Model has no Joints");
+	}
+	return &joints[0];
+}
+
+/*
+=================
+idRenderModelMDX::SetJoint
+=================
+*/
+void idRenderModelMDX::SetJoint(int index, int parentNum, idStr name) {
+	if (!joints.Num()) {
+		common->Error("Model has no Joints");
+	}
+	if (index == 0) {
+		joints[index].name = "origin";
+		joints[index].parent = NULL;
+	}
+	else {
+		joints[index].name = name;
+		joints[index].parent = &joints[parentNum];
+	}
+
+	return;
+}
+
+/*
+=================
+idRenderModelMDX::GetJointHandle
+=================
+*/
+jointHandle_t idRenderModelMDX::GetJointHandle(const char* name) const {
+	const idMD5Joint* joint;
+	int	i;
+
+	joint = joints.Ptr();
+	for (i = 0; i < joints.Num(); i++, joint++) {
+		if (idStr::Icmp(joint->name.c_str(), name) == 0) {
+			return (jointHandle_t)i;
+		}
+	}
+
+	return INVALID_JOINT;
+}
+
+/*
+=================
+idRenderModelMDX::Bounds
+=================
+*/
+idBounds idRenderModelMDX::Bounds(const class idRenderEntity* ent) const {
+	return bounds;
+}
+
+/*
+=================
+idRenderModelMDX::Memory
+=================
+*/
+int	idRenderModelMDX::Memory() const {
+	return dataSize;
+}
+
+/*
+=================
+idRenderModelMDX::RenderFramesToModel
+=================
+*/
+void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, const struct viewDef_s* view, int scale, int frameNum, const renderEntity_t* ent) {
+	int				i, j, k;
+	float			frontlerp, backlerp;
+	int* triangles;
+	int				indexes;
+	int				numVerts;
+	mdxmVertex_t*	v, *verts;
+	mdxmVertexTexCoord_t* tcs, *tc;
+	mdxmHeader_t* header;
+	header = modelData;
+	mdxmSurfHierarchy_t* surfHeader;
+	mdxmLOD_t* lod = (mdxmLOD_t*)((byte*)header + header->ofsLODs);
+	mdxmSurface_t* surface = (mdxmSurface_t*)((byte*)lod + sizeof(mdxmLOD_t) + (header->numSurfaces * sizeof(mdxmLODSurfOffset_t)));
+
+
+	for (int i = 0; i < header->numSurfaces; i++) {
+		srfTriangles_t* tri = R_AllocStaticTriSurf();
+		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
+		R_AllocStaticTriSurfIndexes(tri, surface->numTriangles * 3);
+		tri->bounds.Clear();
+
+		modelSurface_t	surf;
+
+		surf.id = i;
+		surf.geometry = tri;
+
+		surf.shader = materials[i];
+
+		// Set up all triangles.
+		triangles = (int*)((byte*)surface + surface->ofsTriangles);
+		indexes = surface->numTriangles * 3;
+		for (j = 0; j < indexes; j++) {
+			tri->indexes[j] = triangles[j];
+		}
+
+		tri->numIndexes = indexes;
+
+		int* boneRefs = (int*)((byte*)surface + surface->ofsBoneReferences);
+		if (1) {
+			for (int h = 0; h < ent->numJoints; h++) {
+			float* m = ent->joints[h].ToFloatPtr();
+			common->DPrintf("Bone %d: %f %f %f %f %f %f %f %f %f %f %f %f\n", h, m[0], m[1], m[2],
+				m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11]);
+			}
+		}
+
+
+
+
+		if (ent) {
+			idJointMat bone;
+			numVerts = surface->numVerts;
+
+			verts = (mdxmVertex_t*)((byte*)surface + surface->ofsVerts);
+			tcs = (mdxmVertexTexCoord_t*)((byte*)verts + surface->numVerts * sizeof(mdxmVertex_t));
+
+			idList<idJointMat> superJoints;
+			superJoints.SetGranularity(1);
+
+			//GLA_BuildSkinMatricesFromStoredInverseBasePose(ent->joints, superJoints);
+			//GLA_Skin(ent->joints, superJoints);
+			//GLA_Skin2(ent->joints, superJoints);
+			BuildSkinMatrices_Doom3(ent->joints, superJoints);
+
+			for (j = 0; j < numVerts; j++) {
+				idVec3	tempVert, tempNormal;
+				v = &verts[j];
+				tc = &tcs[j];
+
+				int numWeights = G2_GetVertWeights(v);
+				float totalWeight = 0.0f;
+
+				tempVert.Zero();
+				tempNormal.Zero();
+
+				for (k = 0; k < numWeights; k++) {
+					idMat3 rotMatrix;
+
+					int refNum = G2_GetVertBoneIndex(v, k);
+					int boneNum = boneRefs[refNum];
+					float boneWeight = G2_GetVertBoneWeight(v, k, totalWeight, numWeights);
+
+					bone = ent->joints[boneNum];
+					//bone = superJoints[boneNum];
+
+					// Check if this needs transposing
+					rotMatrix = bone.ToMat3().Transpose();
+					//rotMatrix = bone.ToMat3();
+
+					idVec3 localCoords = GLA_ModelToJointLocal_FromAbs12(
+						v->vertCoords,
+						GLA_STORED_BASEPOSE_JOINTS[boneNum].basePoseMat
+					);
+
+					idVec3 test;
+
+					idVec3 origin = bone.ToVec3();          // rotate around world origin
+					idVec3 axis = idVec3(0, 1, 0);    // rotate around y
+					idVec3 axis2 = idVec3(1, 0, 0);    // rotate around y
+					idVec3 axis3 = idVec3(0, 0, 1);    // rotate around y
+					float angle = -90.0f;                // Doom 3 uses degrees here
+					float angle2 = -90.0f;                // Doom 3 uses degrees here
+
+					idRotation rot(origin, axis, angle2);
+					idRotation rot2(origin, axis2, angle);
+					idRotation rot3(origin, axis3, 0);
+
+					test.x = localCoords.x;
+					test.y = localCoords.y;
+					test.z = localCoords.z;
+					//idVec3 skinned = TransformPointByJointMatRaw(bone, v->vertCoords);
+					idVec3 rotated = rot * test;
+					idVec3 rotated2 = rot2 * rotated;
+					idVec3 rotated3 = rot * rotated2;
+
+					//tempVert[0] += boneWeight * skinned.x;
+					//tempVert[1] += boneWeight * skinned.y;
+					//tempVert[2] += boneWeight * skinned.z;
+
+					tempVert[0] += boneWeight * (DotProduct(rotMatrix[0], rotated) + bone.ToVec3().x);
+					tempVert[1] += boneWeight * (DotProduct(rotMatrix[1], rotated) + bone.ToVec3().y);
+					tempVert[2] += boneWeight * (DotProduct(rotMatrix[2], rotated) + bone.ToVec3().z);
+
+					//const float* m = bone.ToFloatPtr();
+
+					//tempVert[0] += boneWeight * (m[0] * v->vertCoords[0] + m[1] * v->vertCoords[1] + m[2] * v->vertCoords[2] + m[3]);
+					//tempVert[1] += boneWeight * (m[4] * v->vertCoords[0] + m[5] * v->vertCoords[1] + m[6] * v->vertCoords[2] + m[7]);
+				//	tempVert[2] += boneWeight * (m[8] * v->vertCoords[0] + m[9] * v->vertCoords[1] + m[10] * v->vertCoords[2] + m[11]);
+
+					//tempVert[0] = v->vertCoords[0];
+					//tempVert[1] = v->vertCoords[1];
+					//tempVert[2] = v->vertCoords[2];
+
+					tempNormal[0] += boneWeight * DotProduct(rotMatrix[0], v->normal);
+					tempNormal[1] += boneWeight * DotProduct(rotMatrix[1], v->normal);
+					tempNormal[2] += boneWeight * DotProduct(rotMatrix[2], v->normal);
+				}
+
+				tri->verts[j].xyz[0] = tempVert[0];
+				tri->verts[j].xyz[1] = tempVert[1];
+				tri->verts[j].xyz[2] = tempVert[2];
+
+				//tri->verts[j].normal[0] = tempNormal[0];
+				//tri->verts[j].normal[1] = tempNormal[1];
+				//tri->verts[j].normal[2] = tempNormal[2];
+
+				//R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
+
+				tri->verts[j].st[0] = tc->texCoords[0];
+				tri->verts[j].st[1] = tc->texCoords[1];
+
+				//tri->generateNormals = false;
+
+			}
+
+			//tess.numVertexes += surface->numVerts;
+			tri->numVerts += surface->numVerts;
+
+			//baseVertex += surface->numVerts;
+			//baseIndex += surface->numTriangles * 3;
+
+			R_BoundTriSurf(tri);
+			R_DeriveTangents(tri);
+
+			// Dynamix - model skins are different between Q3/Doom 3
+			// Generally Q3 derivates use mesh based skinning vs Doom 3
+			// texture based overrides and RTCW/ET don't provide a 
+			// default value for the shader
+			// Long term I will do something mesh based directly, for now
+			// I'll just fill in a material name per surface based on surface name 
+			// or index that I can override
+			//surf.shader = declManager->FindMaterial(surfHeader->name);
+			//surf.shader = declManager->FindMaterial("models/players/rebel/rebel_torso");
+
+			staticModel->AddSurface(surf);
+
+			staticModel->bounds.AddPoint(surf.geometry->bounds[0]);
+			staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
+		} 
+		
+		if (0) {
+			common->Printf("Are we ever here");
+			idVec3	tempVert, tempNormal;
+
+
+			int numWeights = G2_GetVertWeights(v);
+			float totalWeight = 0.0f;
+
+			tempVert.Zero();
+			tempNormal.Zero();
+			numVerts = surface->numVerts;
+
+			verts = (mdxmVertex_t*)((byte*)surface + surface->ofsVerts);
+			tcs = (mdxmVertexTexCoord_t*)((byte*)verts + surface->numVerts * sizeof(mdxmVertex_t));
+
+			v = &verts[j];
+			tc = &tcs[j];
+
+			for (j = 0; j < numVerts; j++) {
+				idVec3	tempVert, tempNormal;
+				v = &verts[j];
+				tc = &tcs[j];
+
+				int numWeights = G2_GetVertWeights(v);
+				float totalWeight = 0.0f;
+
+				tempVert.Zero();
+				tempNormal.Zero();
+			}
+
+			tempVert[0] = v->vertCoords[0];
+			tempVert[1] = v->vertCoords[1];
+			tempVert[2] = v->vertCoords[2];
+
+			tri->verts[j].xyz[0] = tempVert[0];
+			tri->verts[j].xyz[1] = tempVert[1];
+			tri->verts[j].xyz[2] = tempVert[2];
+
+			//tri->verts[j].normal[0] = tempNormal[0];
+			//tri->verts[j].normal[1] = tempNormal[1];
+			//tri->verts[j].normal[2] = tempNormal[2];
+
+			//R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
+
+			tri->verts[j].st[0] = tc->texCoords[0];
+			tri->verts[j].st[1] = tc->texCoords[1];
+
+			//tess.numVertexes += surface->numVerts;
+			tri->numVerts += surface->numVerts;
+
+			//baseVertex += surface->numVerts;
+			//baseIndex += surface->numTriangles * 3;
+
+			R_BoundTriSurf(tri);
+			R_DeriveTangents(tri);
+
+			// Dynamix - model skins are different between Q3/Doom 3
+			// Generally Q3 derivates use mesh based skinning vs Doom 3
+			// texture based overrides and RTCW/ET don't provide a 
+			// default value for the shader
+			// Long term I will do something mesh based directly, for now
+			// I'll just fill in a material name per surface based on surface name 
+			// or index that I can override
+			//surf.shader = declManager->FindMaterial(surfHeader->name);
+			surf.shader = declManager->FindMaterial("models/players/rebel/rebel_torso");
+
+			staticModel->AddSurface(surf);
+
+			staticModel->bounds.AddPoint(surf.geometry->bounds[0]);
+			staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
+		}
+		surface = (mdxmSurface_t*)((byte*)surface + surface->ofsEnd);
+	}
+}
+
+/*
+====================
+idRenderModelMDX::DrawJoints
+====================
+*/
+void idRenderModelMDX::DrawJoints(const renderEntity_t* ent, const struct viewDef_s* view) const {
+	int					i;
+	int					num;
+	idVec3				pos;
+	const idJointMat*	joint;
+	const idMD5Joint*	md5Joint;
+	int					parentNum;
+
+	num = ent->numJoints;
+	joint = ent->joints;
+	md5Joint = joints.Ptr();
+	for (i = 0; i < num; i++, joint++, md5Joint++) {
+		pos = ent->origin + joint->ToVec3() * ent->axis;
+		if (md5Joint->parent) {
+			parentNum = md5Joint->parent - joints.Ptr();
+			session->rw->DebugLine(colorWhite, ent->origin + ent->joints[parentNum].ToVec3() * ent->axis, pos);
+		}
+
+		session->rw->DebugLine(colorRed, pos, pos + joint->ToMat3()[0] * 2.0f * ent->axis);
+		session->rw->DebugLine(colorGreen, pos, pos + joint->ToMat3()[1] * 2.0f * ent->axis);
+		session->rw->DebugLine(colorBlue, pos, pos + joint->ToMat3()[2] * 2.0f * ent->axis);
+	}
+
+	idBounds bounds;
+
+	bounds.FromTransformedBounds(ent->bounds, vec3_zero, ent->axis);
+	session->rw->DebugBounds(colorMagenta, bounds, ent->origin);
+
+	if ((r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin))) {
+		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
+		float	scale;
+
+		scale = r_jointNameScale.GetFloat();
+		joint = ent->joints;
+		num = ent->numJoints;
+		for (i = 0; i < num; i++, joint++) {
+			pos = ent->origin + joint->ToVec3() * ent->axis;
+			session->rw->DrawText(joints[i].name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
+		}
+	}
+}
+
+/*
+=================
+idRenderModelMDX::InstantiateDynamicModel
+=================
+*/
+idRenderModel* idRenderModelMDX::InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel) {
+	idRenderModelStatic* staticModel;
+
+	if (cachedModel) {
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	if (purged) {
+		common->DWarning("model %s instantiated while purged", Name());
+		LoadModel();
+	}
+
+	if (!ent->joints) {
+		common->Printf("idRenderModelMDX::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name());
+		delete cachedModel;
+		return NULL;
+	} else if (ent->numJoints != joints.Num()) {
+		common->Printf("idRenderModelMDX::InstantiateDynamicModel: renderEntity has different number of joints than model for '%s'\n", Name());
+		delete cachedModel;
+		return NULL;
+	}
+
+	int scale = 1;
+
+	staticModel = new idRenderModelStatic;
+	staticModel->bounds.Clear();
+
+	// Dynamix - clean up the parms and/or just merge this back into here
+	if (ent->joints) {
+		// Dynamix - I was using this to manually animate stuff for testing
+		//RenderFramesToModel(staticModel, NULL, view, material, scale, ent->shaderParms[SHADERPARM_MD3_FRAME]);
+		RenderFramesToModel(staticModel, view, scale, 0, ent);
+	} else {
+		RenderFramesToModel(staticModel, view, scale, 1, NULL);
+	}
+
+	if (r_showSkel.GetInteger()) {
+		if ((view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID))) {
+			// only draw the skeleton
+			DrawJoints(ent, view);
+		}
+	}
+
+	return staticModel;
+}
+
+
+/*
+=================
+idRenderModelMDX::GetJointName
+=================
+*/
+const char* idRenderModelMDX::GetJointName(jointHandle_t handle) const {
+	if ((handle < 0) || (handle >= joints.Num())) {
+		return "<invalid joint>";
+	}
+
+	return joints[handle].name;
+}
+
+/*
+=================
+idRenderModelMDX::GetDefaultPose
+=================
+*/
+const idJointQuat* idRenderModelMDX::GetDefaultPose(void) const {
+	return defaultPose.Ptr();
+}
+/*
+=================
+idRenderModelMDX::NearestJoint
+=================
+*/
+int	idRenderModelMDX::NearestJoint(int surfaceNum, int a, int b, int c) const {
+	return 0;
 }

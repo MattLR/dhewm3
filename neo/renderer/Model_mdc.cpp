@@ -27,6 +27,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "sys/platform.h"
+#include "framework/Session.h"
 #include "renderer/tr_local.h"
 #include "renderer/Model_local.h"
 
@@ -282,6 +283,10 @@ void idRenderModelMDC::InitFromFile( const char *fileName ) {
 		surf = (mdcSurface_t *)( (byte *)surf + surf->ofsEnd );
 	}
 
+	// Default pose stuff for tags later Dynamix
+	defaultPose.SetGranularity(1);
+	defaultPose.SetNum(mdc->numTags);
+
 	fileSystem->FreeFile( buffer );
 }
 
@@ -292,6 +297,15 @@ idRenderModelMDC::IsDynamicModel
 */
 dynamicModel_t idRenderModelMDC::IsDynamicModel() const {
 	return DM_CACHED;
+}
+
+/*
+====================
+idRenderModelMDC::GetDefaultPose
+====================
+*/
+const idJointQuat* idRenderModelMDC::GetDefaultPose(void) const {
+	return defaultPose.Ptr();
 }
 
 /*
@@ -370,7 +384,7 @@ void idRenderModelMDC::LerpMeshVertexes ( srfTriangles_t *tri, const struct mdcS
 
 		oldXyzScale = MDC_XYZ_SCALE * backlerp;
 
-		for (vertNum=0 ; vertNum < numVerts ; vertNum++, oldXyz += 4, newXyz += 4 ) {
+		for (vertNum = 0; vertNum < numVerts; vertNum++, oldXyz += 4, newXyz += 4 ) {
 
 			idDrawVert *outvert = &tri->verts[tri->numVerts];
 
@@ -426,6 +440,67 @@ idRenderModel *idRenderModelMDC::InstantiateDynamicModel( const struct renderEnt
 	staticModel = new idRenderModelStatic;
 	staticModel->InitEmpty("_MDC_Snapshot_");
 	staticModel->bounds.Clear();
+
+	// Dynamix 
+	if (r_showSkel.GetInteger()) {
+		if ((view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID))) {
+			// only draw the skeleton
+			DrawTags(ent, view);
+		}
+	}
+
+	// Set the tag positions as joint quats so we can get them on the game side
+	//int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
+	mdcTag_t* tag;
+	mdcTag_t* oldTag;
+	idJointQuat* pose;
+
+	pose = defaultPose.Ptr();
+	tag = (mdcTag_t*)((byte*)mdc + mdc->ofsTags);
+	oldTag = (mdcTag_t*)((byte*)mdc + mdc->ofsTags);
+	oldTag += oldframe  * mdc->numTags;
+	tag += frame * mdc->numTags;
+	float frontlerp = 1.0f - backlerp;
+	for (i = 0; i < mdc->numTags; i++, oldTag++, tag++, pose++) {
+		idVec3 oldPos;
+		idVec3 newPos;
+		idVec3 pos;
+		idQuat oldJ, newJ;
+
+		oldPos.x = oldTag->xyz[0] * MDC_XYZ_SCALE;
+		oldPos.y = oldTag->xyz[1] * MDC_XYZ_SCALE;
+		oldPos.z = oldTag->xyz[2] * MDC_XYZ_SCALE;
+
+		newPos.x = tag->xyz[0] * MDC_XYZ_SCALE;
+		newPos.y = tag->xyz[1] * MDC_XYZ_SCALE;
+		newPos.z = tag->xyz[2] * MDC_XYZ_SCALE;
+
+		//pos.x = oldPos.x * backlerp + newPos.x * frontlerp;
+		////pos.y = oldPos.y * backlerp + newPos.y * frontlerp;
+		//pos.z = oldPos.z * backlerp + newPos.z * frontlerp;
+
+		pos.Lerp(oldPos, newPos, frontlerp);
+		//common->Printf("Old pos %f %f %f\n New pos %f %f %f\n pos: %f %f %f\n", oldPos.x, oldPos.y, oldPos.z
+		//	, newPos.x, newPos.y, newPos.z, pos.x, pos.y, pos.z);
+
+		pose->t = pos;
+		//pose->t = newPos;
+		oldJ = idAngles(
+			oldTag->angles[0] * (360.0f / 32700.0f),
+			oldTag->angles[1] * (360.0f / 32700.0f),
+			oldTag->angles[2] * (360.0f / 32700.0f)
+			).ToQuat();
+
+		newJ = idAngles(
+			tag->angles[0] * (360.0f / 32700.0f),
+			tag->angles[1] * (360.0f / 32700.0f),
+			tag->angles[2] * (360.0f / 32700.0f)
+		).ToQuat();
+
+		pose->q.Slerp(oldJ, newJ, frontlerp);
+
+
+	}
 
 	surface = (mdcSurface_t *) ((byte *)mdc + mdc->ofsSurfaces);
 
@@ -578,4 +653,92 @@ silInfo_t idRenderModelMDC::BuildSilInfo(mdcSurface_t *surf ) {
 	Mem_FreeA( verts, onStack );
 
 	return ret;
+}
+
+/*
+====================
+idRenderModelMDC::DrawTags
+====================
+*/
+void idRenderModelMDC::DrawTags(const renderEntity_t* ent, const struct viewDef_s* view) const {
+	int					i, j;
+	int					num;
+	idVec3				pos;
+	mdcTag_t* tag;
+	mdcTagName_t* tagName;
+	idVec3				origin;
+	
+	int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
+	tag = (mdcTag_t*)((byte*)mdc + mdc->ofsTags);
+	tag += currentFrame * mdc->numTags;
+
+	tagName = (mdcTagName_t*)((byte*)mdc + mdc->ofsTagNames);
+
+	for (i = 0; i < mdc->numTags; i++, tag++, tagName++) {
+		origin.x = tag->xyz[0] * MDC_XYZ_SCALE;
+		origin.y = tag->xyz[1] * MDC_XYZ_SCALE;
+		origin.z = tag->xyz[2] * MDC_XYZ_SCALE;
+		//tag->axis[0][j] = LittleFloat(tag->axis[0][j]);
+		//tag->axis[1][j] = LittleFloat(tag->axis[1][j]);
+		//tag->axis[2][j] = LittleFloat(tag->axis[2][j]);
+
+		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
+		float scale = r_jointNameScale.GetFloat();
+		pos = ent->origin + origin * ent->axis;
+		session->rw->DrawText(tagName->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
+	}
+	
+	/*
+	if ((r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin))) {
+		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
+		float	scale;
+
+		scale = r_jointNameScale.GetFloat();
+		num = md3->numTags;
+		for (i = 0; i < num; i++) {
+			pos = ent->origin + tag->origin * ent->axis;
+			session->rw->DrawText(tag->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
+		}
+	}
+	*/
+}
+
+/*
+====================
+idRenderModelMDC::GetJointHandle
+====================
+*/
+jointHandle_t idRenderModelMDC::GetJointHandle(const char* name) const {
+	int	i;
+
+	mdcTagName_t* tagName;
+
+	tagName = (mdcTagName_t*)((byte*)mdc + mdc->ofsTagNames);
+
+	for (i = 0; i < mdc->numTags; i++, tagName++) {
+		if (idStr::Icmp(tagName->name, name) == 0) {
+			return (jointHandle_t)i;
+		}
+	}
+
+	return INVALID_JOINT;
+}
+
+/*
+=====================
+idRenderModelMDC::GetJointName
+=====================
+*/
+const char* idRenderModelMDC::GetJointName(jointHandle_t handle) const {
+	if ((handle < 0) || (handle >= mdc->numTags)) {
+		return "<invalid joint>";
+	}
+
+	mdcTagName_t* tagName;
+
+	tagName = (mdcTagName_t*)((byte*)mdc + mdc->ofsTagNames);
+	tagName += handle;
+
+	return tagName->name;
+
 }

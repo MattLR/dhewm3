@@ -27,6 +27,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "sys/platform.h"
+#include "framework/Session.h"
 #include "renderer/tr_local.h"
 #include "renderer/Model_local.h"
 
@@ -204,7 +205,18 @@ void idRenderModelMD3::InitFromFile( const char *fileName ) {
 		// register the shaders
 		shader = (md3Shader_t *) ( (byte *)surf + surf->ofsShaders );
 		for ( j = 0 ; j < surf->numShaders ; j++, shader++ ) {
-			const idMaterial *sh = declManager->FindMaterial( shader->name );
+
+			//Dynamix - hack for Raven shaders (Just Elite Force for md3?)
+			char* shaderPtr = (char*)shader + 1;
+			if (memcmp(shaderPtr, "odel", 4) == 0) {
+				char* test = va("%s%s", "m", shaderPtr);
+				strcpy(shader->name, test);
+			}
+
+			//common->Printf("MD3 shader name %s\n", shaderPtr);
+			
+
+			const idMaterial *sh = declManager->FindMaterial(shader->name);
 			// DG: md3Shader_t must use an index to the material instead of a pointer,
 			//     otherwise the sizes are wrong on 64bit and we get data corruption
 			shader->shaderIndex = (sh != NULL) ? shaders.AddUnique( sh ) : -1;
@@ -242,6 +254,10 @@ void idRenderModelMD3::InitFromFile( const char *fileName ) {
 		surf = (md3Surface_t *)( (byte *)surf + surf->ofsEnd );
 	}
 
+	// Default pose stuff for tags later Dynamix
+	defaultPose.SetGranularity(1);
+	defaultPose.SetNum(md3->numTags);
+
 	fileSystem->FreeFile( buffer );
 }
 
@@ -255,6 +271,15 @@ dynamicModel_t idRenderModelMD3::IsDynamicModel() const {
 	//return DM_STATIC;
 	//}
 	return DM_CACHED;
+}
+
+/*
+====================
+idRenderModelMD3::GetDefaultPose
+====================
+*/
+const idJointQuat* idRenderModelMD3::GetDefaultPose(void) const {
+	return defaultPose.Ptr();
 }
 
 /*
@@ -278,7 +303,7 @@ void idRenderModelMD3::LerpMeshVertexes ( srfTriangles_t *tri, const struct md3S
 		//
 		// just copy the vertexes
 		//
-		for (vertNum=0 ; vertNum < numVerts ; vertNum++, newXyz += 4 ) {
+		for (vertNum = 0; vertNum < numVerts; vertNum++, newXyz += 4 ) {
 
 			idDrawVert *outvert = &tri->verts[tri->numVerts];
 
@@ -296,7 +321,7 @@ void idRenderModelMD3::LerpMeshVertexes ( srfTriangles_t *tri, const struct md3S
 
 		oldXyzScale = MD3_XYZ_SCALE * backlerp;
 
-		for (vertNum=0 ; vertNum < numVerts ; vertNum++, oldXyz += 4, newXyz += 4 ) {
+		for (vertNum = 0; vertNum < numVerts; vertNum++, oldXyz += 4, newXyz += 4 ) {
 
 			idDrawVert *outvert = &tri->verts[tri->numVerts];
 
@@ -308,6 +333,44 @@ void idRenderModelMD3::LerpMeshVertexes ( srfTriangles_t *tri, const struct md3S
 			tri->numVerts++;
 		}
 	}
+}
+
+/*
+====================
+idRenderModelMD3::DrawTags
+====================
+*/
+void idRenderModelMD3::DrawTags(const renderEntity_t* ent, const struct viewDef_s* view) const {
+	int					i, j;
+	int					num;
+	idVec3				pos;
+	md3Tag_t* tag;
+
+	int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
+	tag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+	tag += currentFrame * md3->numTags;
+
+	for (i = 0; i < md3->numTags; i++, tag++) {
+
+				idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
+				float scale = r_jointNameScale.GetFloat();
+				pos = ent->origin + tag->origin * ent->axis;
+				session->rw->DrawText(tag->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
+	}
+
+	/*
+	if ((r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin))) {
+		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
+		float	scale;
+
+		scale = r_jointNameScale.GetFloat();
+		num = md3->numTags;
+		for (i = 0; i < num; i++) {
+			pos = ent->origin + tag->origin * ent->axis;
+			session->rw->DrawText(tag->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
+		}
+	}
+	*/
 }
 
 /*
@@ -338,6 +401,36 @@ idRenderModel *idRenderModelMD3::InstantiateDynamicModel( const struct renderEnt
 	staticModel = new idRenderModelStatic;
 	staticModel->InitEmpty("_MD3_Snapshot_");
 	staticModel->bounds.Clear();
+
+	//Dynamix 
+	if (r_showSkel.GetInteger()) {
+		if ((view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID))) {
+			// only draw the skeleton
+			DrawTags(ent, view);
+		}
+	}
+
+	// Set the tag positions as joint quats so we can get them on the game side
+	// Dynamix - make into a function
+	int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
+	md3Tag_t* tag;
+	idJointQuat* pose;
+
+	pose = defaultPose.Ptr();
+	tag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+	tag += currentFrame * md3->numTags;
+	tag->origin[i];
+	for (i = 0; i < md3->numTags; i++, tag++, pose++) {
+
+		pose->q = idMat3(
+			tag->axis[0],
+			tag->axis[1],
+			tag->axis[2]
+		).ToQuat();
+
+		pose->t = tag->origin;
+	}
+
 
 	surface = (md3Surface_t *) ((byte *)md3 + md3->ofsSurfaces);
 
@@ -490,4 +583,43 @@ silInfo_t idRenderModelMD3::BuildSilInfo( md3Surface_t *surf ) {
 	Mem_FreeA( verts, onStack );
 
 	return ret;
+}
+
+/*
+====================
+idRenderModelMD3::GetJointHandle
+====================
+*/
+jointHandle_t idRenderModelMD3::GetJointHandle(const char* name) const {
+	int	i;
+
+	md3Tag_t* tag;
+
+	tag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+
+	for (i = 0; i < md3->numTags; i++, tag++) {
+		if (idStr::Icmp(tag->name, name) == 0) {
+			return (jointHandle_t)i;
+		}
+	}
+
+	return INVALID_JOINT;
+}
+
+/*
+=====================
+idRenderModelMD3::GetJointName
+=====================
+*/
+const char* idRenderModelMD3::GetJointName(jointHandle_t handle) const {
+	if ((handle < 0) || (handle >= md3->numTags)) {
+		return "<invalid joint>";
+	}
+
+	md3Tag_t* tag;
+
+	tag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+	tag += handle;
+
+	return tag->name;
 }

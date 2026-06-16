@@ -25,6 +25,7 @@ MDS file format (Wolfenstein Skeletal Format)
 #define MDS_MAX_BONES       128
 #define MDS_MAX_SURFACES    32
 #define MDS_MAX_TAGS        128
+#define MAX_MDSPATH			64
 
 #define MDS_TRANSLATION_SCALE   ( 1.0 / 64 )
 
@@ -50,8 +51,8 @@ struct mdsTriangle_t {
 struct mdsSurface_t {
 	int			ident;
 
-	char		name[MAX_MD3PATH];	// polyset name
-	char		shader[MAX_MD3PATH];
+	char		name[MAX_MDSPATH];	// polyset name
+	char		shader[MAX_MDSPATH];
 	int			shaderIndex;	// for in-game use
 
 	int			minLod;
@@ -106,7 +107,7 @@ struct mdsLOD_t {
 };
 
 struct mdsTag_t {
-	char		name[MAX_MD3PATH];	// name of tag
+	char		name[MAX_MDSPATH];	// name of tag
 	float		torsoWeight;
 	int			boneIndex;			// our index in the bones
 
@@ -115,7 +116,7 @@ struct mdsTag_t {
 #define BONEFLAG_TAG        1       // this bone is actually a tag
 
 struct mdsBoneInfo_t {
-	char name[MAX_MD3PATH];         // name of bone
+	char name[MAX_MDSPATH];         // name of bone
 	int parent;                     // not sure if this is required, no harm throwing it in
 	float torsoWeight;              // scale torso rotation about torsoParent by this
 	float parentDist;
@@ -127,7 +128,7 @@ struct mdsHeader_t {
 	int			ident;
 	int			version;
 
-	char		name[MAX_MD3PATH];	// model name
+	char		name[MAX_MDSPATH];	// model name
 
 	float		lodScale;
 	float		lodBias;
@@ -241,8 +242,8 @@ typedef struct mdmTriangle_s {
 typedef struct mdmSurface_s {
 	int ident;
 
-	char name[MAX_MD3PATH];           // polyset name
-	char shader[MAX_MD3PATH];
+	char name[MAX_MDSPATH];           // polyset name
+	char shader[MAX_MDSPATH];
 	int shaderIndex;                // for in-game use
 
 	int minLod;
@@ -276,7 +277,7 @@ typedef struct mdmLOD_s {
 
 // Tags always only have one parent bone
 typedef struct mdmTag_s {
-	char name[MAX_MD3PATH];           // name of tag
+	char name[MAX_MDSPATH];           // name of tag
 	idVec3 axis[3];
 
 	int boneIndex;
@@ -292,7 +293,7 @@ typedef struct mdmHeader_t {
 	int ident;
 	int version;
 
-	char name[MAX_MD3PATH];           // model name
+	char name[MAX_MDSPATH];           // model name
 
 	float lodScale;
 	float lodBias;

@@ -254,8 +254,12 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 		}
 		*/
 		// register the shaders
-		const char* materialName = va("%s%s", "m", surf->shader);
-		if (surf->shader[0]) {
+		idStr bloobloo = name;
+		bloobloo.StripTrailingOnce("body.mds");
+		const char* materialName = va("%s%s", bloobloo.c_str(), surf->name);
+		common->Printf("Material name %s\n", materialName);
+
+		if (materialName[0]) {
 			//sh = R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			if (sh == nullptr) {
@@ -545,7 +549,7 @@ void idRenderModelMDS::RenderFramesToModel(idRenderModelStatic *staticModel, con
 			// default texture
 			//common->Printf("Surf name %s", surface->name);
 			//surf.shader = declManager->FindMaterial("models/players/Bj/bj_body1.tga");
-			surf.shader = declManager->FindMaterial(surface->name);
+			//surf.shader = declManager->FindMaterial(surface->name);
 
 			staticModel->AddSurface(surf);
 			
@@ -724,7 +728,7 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 	numAnims = 0;
 
 	ParseAnims(animInfo, numAnims);
-	common->Printf("Numanims = %d\n", numAnims);
+	common->DPrintf("Numanims = %d\n", numAnims);
 
 	//idStr animName = name;
 	//animName.StripFileExtension();
@@ -834,22 +838,27 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 		animName.Append(animInfo[c].animName);
 		animName.Append(".md5anim");
 
-		common->Printf("writing %s\n", animName.c_str());
+		if (findFile_t test = fileSystem->FindFile(animName, 0)) {
+			common->DPrintf("Found file for anim #%d for MDS model, skipping file generation\n", c);
+			continue;
+		}
+
+		common->Printf("Writing %s\n", animName.c_str());
 		fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
 	
-	if (!fp) {
-		common->Warning("WriteAnims: Error opening file %s\n", name.c_str());
-		return false;
-	}
+		if (!fp) {
+			common->Warning("WriteAnims: Error opening file %s\n", name.c_str());
+			return false;
+		}
 
-	fp->WriteFloatString("MD5Version 10\n\ncommandline \"\"\n");
+		fp->WriteFloatString("MD5Version 10\n\ncommandline \"\"\n");
 
-	fp->WriteFloatString("numFrames %d\n", numFrames);
-	fp->WriteFloatString("numJoints %d\n", numBones);
-	fp->WriteFloatString("frameRate %d\n", animInfo[c].animInfo[3]);
-	fp->WriteFloatString("numAnimatedComponents %d\n\n", numBones * 6);
+		fp->WriteFloatString("numFrames %d\n", numFrames);
+		fp->WriteFloatString("numJoints %d\n", numBones);
+		fp->WriteFloatString("frameRate %d\n", animInfo[c].animInfo[3]);
+		fp->WriteFloatString("numAnimatedComponents %d\n\n", numBones * 6);
 
-	fp->WriteFloatString("hierarchy {\n");
+		fp->WriteFloatString("hierarchy {\n");
 
 	for (int i = 0; i < numBones; i++) {
 		thisBoneInfo = &boneInfo[i];
@@ -1023,9 +1032,11 @@ void idRenderModelMDS::ParseAnims(idList <animInfo_t>& animInfo, int &numAnims) 
 		animInfo[i].animInfo[5] = -2;
 	}
 
-	common->Printf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
+	/*
+	common->DPrintf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
 		animInfo[i].animInfo[2], animInfo[i].animInfo[3],
 		animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
+	*/
 	i++;
 	}
 
@@ -1253,9 +1264,12 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 		// register the shaders
 		//const char* materialName = va("%s%s", "m", surf->shader);
-		const char* materialName = va("%s", surf->name);
+		idStr bloobloo = name;
+		//bloobloo.StripFileExtension();
+		bloobloo.StripTrailingOnce("body.mdm");
+		const char* materialName = va("%s%s", bloobloo.c_str(), surf->name);
 		common->Printf("Material name %s\n", materialName);
-		if (surf->shader[0]) {
+		if (materialName[0]) {
 			//sh = R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			if (sh == nullptr) {
@@ -1556,7 +1570,7 @@ void idRenderModelMDM::RenderFramesToModel(idRenderModelStatic* staticModel, con
 			// Long term I will do something mesh based directly, for now
 			// I'll just fill in a material name per surface based on surface name 
 			// or index that I can override
-			surf.shader = declManager->FindMaterial(surface->name);
+			//surf.shader = declManager->FindMaterial(surface->name);
 
 			staticModel->AddSurface(surf);
 
