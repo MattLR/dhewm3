@@ -258,6 +258,10 @@ void idRenderModelMD3::InitFromFile( const char *fileName ) {
 	defaultPose.SetGranularity(1);
 	defaultPose.SetNum(md3->numTags);
 
+	// If this is only one frame generate the static model information to fix loading issues and allow physics generation
+	if (md3->numFrames == 1) {
+		CreateSurfaces();
+	}
 	fileSystem->FreeFile( buffer );
 }
 
@@ -267,9 +271,9 @@ idRenderModelMD3::IsDynamicModel
 =================
 */
 dynamicModel_t idRenderModelMD3::IsDynamicModel() const {
-	//if (md3->numFrames == 1) {
-	//return DM_STATIC;
-	//}
+	if (md3->numFrames == 1) {
+	return DM_STATIC;
+	}
 	return DM_CACHED;
 }
 
@@ -413,22 +417,37 @@ idRenderModel *idRenderModelMD3::InstantiateDynamicModel( const struct renderEnt
 	// Set the tag positions as joint quats so we can get them on the game side
 	// Dynamix - make into a function
 	int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
-	md3Tag_t* tag;
+	md3Tag_t* tag, *oldTag;
 	idJointQuat* pose;
 
 	pose = defaultPose.Ptr();
+	oldTag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+	oldTag += oldframe * md3->numTags;
 	tag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
 	tag += currentFrame * md3->numTags;
-	tag->origin[i];
-	for (i = 0; i < md3->numTags; i++, tag++, pose++) {
+	float frontlerp = 1.0f - backlerp;
 
-		pose->q = idMat3(
+	for (i = 0; i < md3->numTags; i++, oldTag++, tag++, pose++) {
+		idVec3 oldPos, newPos;
+		idQuat oldQuat, newQuat;
+
+		oldQuat = idMat3(
+			oldTag->axis[0],
+			oldTag->axis[1],
+			oldTag->axis[2]
+		).ToQuat();
+
+		newQuat = idMat3(
 			tag->axis[0],
 			tag->axis[1],
 			tag->axis[2]
 		).ToQuat();
 
-		pose->t = tag->origin;
+		oldPos = oldTag->origin;
+		newPos = tag->origin;
+
+		pose->t.Lerp(oldPos, newPos, frontlerp);
+		pose->q.Slerp(oldQuat, newQuat, frontlerp);
 	}
 
 
@@ -622,4 +641,116 @@ const char* idRenderModelMD3::GetJointName(jointHandle_t handle) const {
 	tag += handle;
 
 	return tag->name;
+}
+
+/*
+=============
+idRenderModelMD3::CreateSurfaces
+=============
+*/
+void idRenderModelMD3::CreateSurfaces() {
+	int				i, j;
+	float			backlerp;
+	float*			texCoords;
+	int				numVerts;
+	md3Surface_t*	surface;
+	int				frame, oldframe;
+
+	// TODO: these need set by an entity
+	frame = 0;	// probably want to keep frames < 1000 or so
+	oldframe = 0;
+	backlerp = 0;
+
+
+	this->bounds.Clear();
+
+	// Set the tag positions as joint quats so we can get them on the game side
+	// Dynamix - make into a function
+	md3Tag_t* tag, * oldTag;
+	idJointQuat* pose;
+
+	pose = defaultPose.Ptr();
+	oldTag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+	oldTag += oldframe * md3->numTags;
+	tag = (md3Tag_t*)((byte*)md3 + md3->ofsTags);
+	tag += frame * md3->numTags;
+	float frontlerp = 1.0f - backlerp;
+
+	for (i = 0; i < md3->numTags; i++, oldTag++, tag++, pose++) {
+		idVec3 oldPos, newPos;
+		idQuat oldQuat, newQuat;
+
+		oldQuat = idMat3(
+			oldTag->axis[0],
+			oldTag->axis[1],
+			oldTag->axis[2]
+		).ToQuat();
+
+		newQuat = idMat3(
+			tag->axis[0],
+			tag->axis[1],
+			tag->axis[2]
+		).ToQuat();
+
+		oldPos = oldTag->origin;
+		newPos = tag->origin;
+
+		pose->t.Lerp(oldPos, newPos, frontlerp);
+		pose->q.Slerp(oldQuat, newQuat, frontlerp);
+	}
+
+	surface = (md3Surface_t*)((byte*)md3 + md3->ofsSurfaces);
+
+	for (i = 0; i < md3->numSurfaces; i++) {
+
+		srfTriangles_t* tri = R_AllocStaticTriSurf();
+		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
+
+		// DG: set sil edges for shadows
+		silInfo_t& silInfo = silInfos[i];
+		tri->numSilEdges = silInfo.numSilEdges;
+		tri->silEdges = silInfo.silEdges;
+		tri->silIndexes = silInfo.silIndexes;
+
+		tri->indexes = silInfo.indexes;
+		tri->numIndexes = silInfo.numIndexes;
+		assert(surface->numTriangles * 3 == silInfo.numIndexes);
+
+		// deformedSurface prevents silEdges, silIndexes, indexes (and more not used here)
+		// from being freed (they belong to silInfo which is freed in ~idRenderModelMD3())
+		tri->deformedSurface = true;
+
+		tri->bounds.Clear();
+
+		modelSurface_t	surf;
+
+		surf.geometry = tri;
+
+		md3Shader_t* shaders = (md3Shader_t*)((byte*)surface + surface->ofsShaders);
+		// FIXME: theoretically there can be multiple shaders?
+		// DG: turned md3Shader_t::shader (pointer) into an int (index)
+		int shaderIdx = shaders->shaderIndex;
+		surf.shader = (shaderIdx >= 0) ? this->shaders[shaderIdx] : NULL;
+
+		LerpMeshVertexes(tri, surface, backlerp, frame, oldframe);
+
+		texCoords = (float*)((byte*)surface + surface->ofsSt);
+
+		numVerts = surface->numVerts;
+		for (j = 0; j < numVerts; j++) {
+			idDrawVert* stri = &tri->verts[j];
+			stri->st[0] = texCoords[j * 2 + 0];
+			stri->st[1] = texCoords[j * 2 + 1];
+		}
+
+		R_BoundTriSurf(tri);
+
+		surf.id = this->NumSurfaces(); // DG: make sure to initialize id; FIXME: or just set id to 0?
+		this->AddSurface(surf);
+		this->bounds.AddPoint(surf.geometry->bounds[0]);
+		this->bounds.AddPoint(surf.geometry->bounds[1]);
+
+		// find the next surface
+		surface = (md3Surface_t*)((byte*)surface + surface->ofsEnd);
+	}
 }

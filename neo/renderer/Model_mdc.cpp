@@ -148,7 +148,7 @@ void idRenderModelMDC::InitFromFile( const char *fileName ) {
 	LL(mdc->numSkins);
 
 	//Dynamix for testing
-	common->Printf("Blah blah frames %5i\n", mdc->numFrames);
+	//common->Printf("Blah blah frames %5i\n", mdc->numFrames);
 	if (mdc->numFrames < 1 ) {
 		common->Warning( "InitFromFile: %s has no frames", fileName );
 		fileSystem->FreeFile( buffer );
@@ -498,8 +498,6 @@ idRenderModel *idRenderModelMDC::InstantiateDynamicModel( const struct renderEnt
 		).ToQuat();
 
 		pose->q.Slerp(oldJ, newJ, frontlerp);
-
-
 	}
 
 	surface = (mdcSurface_t *) ((byte *)mdc + mdc->ofsSurfaces);

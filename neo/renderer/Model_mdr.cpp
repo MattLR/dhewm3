@@ -319,7 +319,7 @@ bool rvmRenderModelMDR::LoadMDRFile(void *buffer, int filesize) {
 			// lowercase the surface name so skin compares are faster
 			strlwr(surf->name);
 
-			// Raven models are missing the first letter for some reason - I'm suring I'm not doing this efficiently but it works
+			// Raven models are missing the first letter for some reason - I'm sure I'm not doing this efficiently but it works
 			// In mdr the string is just one character over and missing the first char,
 			// in glm it's in the right place but has a null first character I think
 	
@@ -1040,7 +1040,7 @@ bool rvmRenderModelMDR::WriteAnimToDisk() {
 			continue;
 		}
 
-		common->Printf("Writing %s\n", animName.c_str());
+		common->DPrintf("Writing %s\n", animName.c_str());
 		fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
 
 		if (!fp) {
@@ -1402,11 +1402,17 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 	mdxm->ident = LittleLong(pinmodel->ident);
 	mdxm->version = pinmodel->version;	// Don't need to swap byte order on this one, we already did above.
 	strcpy(mdxm->name, pinmodel->name);
+	strcpy(mdxm->animName, pinmodel->animName);
 	mdxm->numSurfaces = pinmodel->numSurfaces;
 	mdxm->ofsEnd = LittleLong(pinmodel->ofsEnd);
 	mdxm->ofsSurfHierarchy = LittleLong(pinmodel->ofsSurfHierarchy);
 
-	common->Printf("Version %d, name %s, # surfaces %d\n", mdxm->version, mdxm->name, mdxm->numSurfaces);
+	if (idStr::Icmp(mdxm->animName, "*default") == 0) {
+		common->DPrintf("Static model\n");
+		isStatic = true;
+	}
+
+	common->DPrintf("Version %d, name %s, animName %s, # bones %d, # surfaces %d\n", mdxm->version, mdxm->name, mdxm->animName, mdxm->numBones, mdxm->numSurfaces);
 
 	surfHeader = (mdxmSurfHierarchy_t*)((byte*)mdxm + mdxm->ofsSurfHierarchy);
 	for (i = 0; i < mdxm->numSurfaces; i++) {
@@ -1433,7 +1439,7 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 		// register the shaders
 		//const char* materialName = va("%s%s", "m", surf->shader);
 		const char* materialName = va("%s", surfHeader->shader);
-		common->Printf("Material name %s\n", surfHeader->shader);
+		common->DPrintf("Material name %s\n", surfHeader->shader);
 		if (surfHeader->shader[0]) {
 			//sh = R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
@@ -1460,7 +1466,9 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 	// swap all the LOD's
 	for (l = 0; l < mdxm->numLODs; l++) {
 		// simple bounds check
-		if ((byte*)(lod + 1) > (byte*)mdxm + size) {
+		if (0) {
+		//if ((byte*)(lod + 1) > (byte*)mdxm + size) {
+			// This didn't work on a static model? FIXME Dynamix
 			common->Warning("R_LoadMDX: %s has broken structure.\n", mod_name);
 			return false;
 		}
@@ -1684,7 +1692,7 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 		tri->numIndexes = indexes;
 
 		int* boneRefs = (int*)((byte*)surface + surface->ofsBoneReferences);
-		if (1) {
+		if (0) {
 			for (int h = 0; h < ent->numJoints; h++) {
 			float* m = ent->joints[h].ToFloatPtr();
 			common->DPrintf("Bone %d: %f %f %f %f %f %f %f %f %f %f %f %f\n", h, m[0], m[1], m[2],
@@ -1694,8 +1702,8 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 
 
 
-
-		if (ent) {
+		if (0) {
+		//if (ent) {
 			idJointMat bone;
 			numVerts = surface->numVerts;
 
@@ -1826,13 +1834,9 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 			staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
 		} 
 		
-		if (0) {
-			common->Printf("Are we ever here");
+		// If it's a static mesh just do this 
+		if (1) {
 			idVec3	tempVert, tempNormal;
-
-
-			int numWeights = G2_GetVertWeights(v);
-			float totalWeight = 0.0f;
 
 			tempVert.Zero();
 			tempNormal.Zero();
@@ -1841,41 +1845,35 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 			verts = (mdxmVertex_t*)((byte*)surface + surface->ofsVerts);
 			tcs = (mdxmVertexTexCoord_t*)((byte*)verts + surface->numVerts * sizeof(mdxmVertex_t));
 
-			v = &verts[j];
-			tc = &tcs[j];
 
 			for (j = 0; j < numVerts; j++) {
 				idVec3	tempVert, tempNormal;
 				v = &verts[j];
 				tc = &tcs[j];
 
-				int numWeights = G2_GetVertWeights(v);
-				float totalWeight = 0.0f;
+				tempVert[0] = v->vertCoords[0];
+				tempVert[1] = v->vertCoords[1];
+				tempVert[2] = v->vertCoords[2];
 
-				tempVert.Zero();
-				tempNormal.Zero();
+				tri->verts[j].xyz[0] = tempVert[0];
+				tri->verts[j].xyz[1] = tempVert[1];
+				tri->verts[j].xyz[2] = tempVert[2];
+
+				//tri->verts[j].normal[0] = tempNormal[0];
+				//tri->verts[j].normal[1] = tempNormal[1];
+				//tri->verts[j].normal[2] = tempNormal[2];
+
+				//R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
+
+				tri->verts[j].st[0] = tc->texCoords[0];
+				tri->verts[j].st[1] = tc->texCoords[1];
+
 			}
-
-			tempVert[0] = v->vertCoords[0];
-			tempVert[1] = v->vertCoords[1];
-			tempVert[2] = v->vertCoords[2];
-
-			tri->verts[j].xyz[0] = tempVert[0];
-			tri->verts[j].xyz[1] = tempVert[1];
-			tri->verts[j].xyz[2] = tempVert[2];
-
-			//tri->verts[j].normal[0] = tempNormal[0];
-			//tri->verts[j].normal[1] = tempNormal[1];
-			//tri->verts[j].normal[2] = tempNormal[2];
-
-			//R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
-
-			tri->verts[j].st[0] = tc->texCoords[0];
-			tri->verts[j].st[1] = tc->texCoords[1];
 
 			//tess.numVertexes += surface->numVerts;
 			tri->numVerts += surface->numVerts;
 
+			
 			//baseVertex += surface->numVerts;
 			//baseIndex += surface->numTriangles * 3;
 
@@ -1890,7 +1888,7 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 			// I'll just fill in a material name per surface based on surface name 
 			// or index that I can override
 			//surf.shader = declManager->FindMaterial(surfHeader->name);
-			surf.shader = declManager->FindMaterial("models/players/rebel/rebel_torso");
+			//surf.shader = declManager->FindMaterial("models/players/rebel/rebel_torso");
 
 			staticModel->AddSurface(surf);
 
@@ -1967,11 +1965,11 @@ idRenderModel* idRenderModelMDX::InstantiateDynamicModel(const struct renderEnti
 	}
 
 	if (!ent->joints) {
-		common->Printf("idRenderModelMDX::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name());
+		common->DPrintf("idRenderModelMDX::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name());
 		delete cachedModel;
 		return NULL;
 	} else if (ent->numJoints != joints.Num()) {
-		common->Printf("idRenderModelMDX::InstantiateDynamicModel: renderEntity has different number of joints than model for '%s'\n", Name());
+		common->DPrintf("idRenderModelMDX::InstantiateDynamicModel: renderEntity has different number of joints than model for '%s'\n", Name());
 		delete cachedModel;
 		return NULL;
 	}

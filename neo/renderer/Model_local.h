@@ -253,6 +253,7 @@ private:
 	
 	//Dynamix
 	void						DrawTags(const renderEntity_t* ent, const struct viewDef_s* view) const;
+	void						CreateSurfaces(void);
 };
 
 /*
@@ -572,6 +573,7 @@ private:
 	int							dataSize;
 	struct mdxmHeader_t*		modelData;
 	bool						doOnce = true;
+	bool						isStatic = false;
 
 	idRenderModelStatic*		cachedModel;
 
