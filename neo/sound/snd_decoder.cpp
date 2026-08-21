@@ -34,6 +34,10 @@ If you have questions concerning this license or the applicable additional terms
 #define STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.h"
 
+#define DR_MP3_IMPLEMENTATION
+#define DR_MP3_NO_STDIO
+#include "dr_mp3.h"
+
 #include "sys/platform.h"
 #include "framework/FileSystem.h"
 
@@ -278,6 +282,154 @@ int idWaveFile::CloseOGG( void ) {
 	return -1;
 }
 
+/*
+===================================================================================
+
+  MP3 file loading/decoding.
+
+===================================================================================
+*/
+
+/*
+====================
+idWaveFile::OpenMP3
+====================
+*/
+int idWaveFile::OpenMP3(const char* strFileName, waveformatex_t* pwfx) {
+
+	memset(pwfx, 0, sizeof(waveformatex_t));
+
+	mhmmio = fileSystem->OpenFileRead(strFileName);
+	if (!mhmmio) {
+		return -1;
+	}
+
+	Sys_EnterCriticalSection(CRITICAL_SECTION_ONE);
+
+	int fileSize = mhmmio->Length();
+	byte* mp3FileData = (byte*)Mem_Alloc(fileSize);
+
+	mhmmio->Read(mp3FileData, fileSize);
+
+	drmp3* pmp3 = (drmp3*)Mem_Alloc(sizeof(drmp3));
+
+	if (!drmp3_init_memory(pmp3, mp3FileData, fileSize, NULL)) {
+		Mem_Free(mp3FileData);
+		Mem_Free(pmp3);
+		Sys_LeaveCriticalSection(CRITICAL_SECTION_ONE);
+		fileSystem->CloseFile(mhmmio);
+		mhmmio = NULL;
+		return -1;
+	}
+
+	mfileTime = mhmmio->Timestamp();
+
+	uint64_t numFrames = drmp3_get_pcm_frame_count(pmp3);
+	if (numFrames == 0) {
+		//stbverr = stb_vorbis_get_error(ov);
+		common->Warning("Couldn't get sound length of '%s' with dr_mp3: \n", strFileName);
+		// TODO:  return -1 etc?
+	}
+
+
+	mpwfx.Format.nSamplesPerSec = pmp3->sampleRate;
+	mpwfx.Format.nChannels = pmp3->channels;
+	mpwfx.Format.wBitsPerSample = sizeof(short) * 8;
+	mdwSize = numFrames * pmp3->channels;	// pcm samples * num channels
+	mbIsReadingFromMemory = false;
+
+	if (idSoundSystemLocal::s_realTimeDecoding.GetBool()) {
+
+		drmp3_uninit(pmp3);
+		fileSystem->CloseFile(mhmmio);
+		mhmmio = NULL;
+		Mem_Free(mp3FileData);
+
+		mpwfx.Format.wFormatTag = WAVE_FORMAT_TAG_MP3;;
+		mhmmio = fileSystem->OpenFileRead(strFileName);
+		mMemSize = mhmmio->Length();
+
+	}
+	else {
+
+		mp3 = pmp3;
+		mp3Data = mp3FileData;
+
+		mpwfx.Format.wFormatTag = WAVE_FORMAT_TAG_PCM;
+		mMemSize = mdwSize * sizeof(short);
+	}
+
+	memcpy(pwfx, &mpwfx, sizeof(waveformatex_t));
+
+	Sys_LeaveCriticalSection(CRITICAL_SECTION_ONE);
+
+	isMp3 = true;
+
+	return 0;
+}
+
+/*
+====================
+idWaveFile::ReadMP3
+====================
+*/
+int idWaveFile::ReadMP3(byte* pBuffer, int dwSizeToRead, int* pdwSizeRead) {
+	// Dynamix add error handling
+	drmp3* pmp3 = mp3;
+
+	drmp3_uint64 framesToRead = dwSizeToRead / (sizeof(short) * mpwfx.Format.nChannels);
+
+	drmp3_uint64 framesRead = drmp3_read_pcm_frames_s16(
+		pmp3,
+		framesToRead,
+		(drmp3_int16*)pBuffer
+	);
+
+	int bytesRead = framesRead * mpwfx.Format.nChannels * sizeof(short);
+
+	if (pdwSizeRead != NULL) {
+		*pdwSizeRead = bytesRead;
+	}
+
+	return bytesRead;
+}
+
+/*
+====================
+idWaveFile::CloseMp3
+====================
+*/
+int idWaveFile::CloseMP3(void) {
+	drmp3* decoder = mp3;
+
+	if (decoder != NULL) {
+		Sys_EnterCriticalSection(CRITICAL_SECTION_ONE);
+		drmp3_uninit(decoder);
+		Sys_LeaveCriticalSection(CRITICAL_SECTION_ONE);
+
+		Mem_Free(decoder);
+		mp3 = NULL;
+
+		if (mhmmio != NULL) {
+			fileSystem->CloseFile(mhmmio);
+			mhmmio = NULL;
+		}
+
+		if (mp3Data != NULL) {
+			Mem_Free(mp3Data);
+			mp3Data = NULL;
+		}
+
+		isMp3 = false;
+
+		return 0;
+	}
+
+	return -1;
+
+	// Should I check mhmmio and mp3Data
+}
+
 
 /*
 ===================================================================================
@@ -297,6 +449,7 @@ public:
 	void					Clear( void );
 	int						DecodePCM( idSoundSample *sample, int sampleOffset44k, int sampleCount44k, float *dest );
 	int						DecodeOGG( idSoundSample *sample, int sampleOffset44k, int sampleCount44k, float *dest );
+	int						DecodeMP3(idSoundSample* sample, int sampleOffset44k, int sampleCount44k, float* dest);
 
 private:
 	bool					failed;				// set if decoding failed
@@ -306,7 +459,10 @@ private:
 	int						lastDecodeTime;		// last time decoding sound
 
 	stb_vorbis*				stbv;				// stb_vorbis (Ogg) handle, using lastSample->nonCacheData
+	drmp3*					mp3;				// stb_vorbis (Ogg) handle, using lastSample->nonCacheData
+
 };
+
 
 idBlockAlloc<idSampleDecoderLocal, 64>		sampleDecoderAllocator;
 
@@ -383,6 +539,7 @@ void idSampleDecoderLocal::Clear( void ) {
 	lastSampleOffset = 0;
 	lastDecodeTime = 0;
 	stbv = NULL;
+	mp3 = NULL;
 }
 
 /*
@@ -400,6 +557,11 @@ void idSampleDecoderLocal::ClearDecoder( void ) {
 		case WAVE_FORMAT_TAG_OGG: {
 			stb_vorbis_close( stbv );
 			stbv = NULL;
+			break;
+		}
+		case WAVE_FORMAT_TAG_MP3: {
+			drmp3_uninit(mp3);
+			mp3 = NULL;
 			break;
 		}
 	}
@@ -456,6 +618,10 @@ void idSampleDecoderLocal::Decode( idSoundSample *sample, int sampleOffset44k, i
 		}
 		case WAVE_FORMAT_TAG_OGG: {
 			readSamples44k = DecodeOGG( sample, sampleOffset44k, sampleCount44k, dest );
+			break;
+		}
+		case WAVE_FORMAT_TAG_MP3: {
+			readSamples44k = DecodeMP3(sample, sampleOffset44k, sampleCount44k, dest);
 			break;
 		}
 		default: {
@@ -632,4 +798,77 @@ int idSampleDecoderLocal::DecodeOGG( idSoundSample *sample, int sampleOffset44k,
 	lastSampleOffset += readSamples;
 
 	return ( readSamples << shift );
+}
+
+/*
+====================
+idSampleDecoderLocal::DecodeMP3
+====================
+*/
+int idSampleDecoderLocal::DecodeMP3(idSoundSample* sample, int sampleOffset44k, int sampleCount44k, float* dest) {
+		int readSamples;
+
+		// Open MP3 if not already opened.
+		if (lastSample == NULL) {
+			if (decoderMemoryAllocator.GetFreeBlockMemory() < MIN_OGGVORBIS_MEMORY) {
+				return 0;
+			}
+
+			if (sample->nonCacheData == NULL) {
+				common->Warning("Called idSampleDecoderLocal::DecodeMP3() on idSoundSample '%s' without nonCacheData\n", sample->name.c_str());
+				failed = true;
+				return 0;
+			}
+
+			assert(mp3 == NULL);
+
+			mp3 = (drmp3*)decoderMemoryAllocator.Alloc(sizeof(drmp3));
+
+			if (!drmp3_init_memory(mp3, sample->nonCacheData, sample->objectMemSize, NULL)) {
+				common->Warning("idSampleDecoderLocal::DecodeMP3() drmp3_init_memory() for %s failed\n",
+					sample->name.c_str());
+				failed = true;
+				return 0;
+			}
+
+			lastFormat = WAVE_FORMAT_TAG_MP3;
+			lastSample = sample;
+		}
+
+		if (sample->objectInfo.nChannels > 2) {
+			common->Warning("MP3 files with >2 channels are not supported!\n");
+			failed = true;
+			return 0;
+		}
+
+		// Seek if necessary.
+		if (sampleOffset44k != lastSampleOffset) {
+			if (!drmp3_seek_to_pcm_frame(mp3, sampleOffset44k / sample->objectInfo.nChannels)) {
+				common->Warning("idSampleDecoderLocal::DecodeMP3() seek failed for %s\n",
+					sample->name.c_str());
+				failed = true;
+				return 0;
+			}
+		}
+
+		lastSampleOffset = sampleOffset44k;
+
+		int framesToRead = sampleCount44k / sample->objectInfo.nChannels;
+
+		drmp3_uint64 framesRead = drmp3_read_pcm_frames_f32(
+			mp3,
+			framesToRead,
+			dest
+		);
+
+		readSamples = (int)(framesRead * sample->objectInfo.nChannels);
+
+		// Convert [-1,1] floats to Doom's sample range.
+		for (int i = 0; i < readSamples; i++) {
+			dest[i] *= 32768.0f;
+		}
+
+		lastSampleOffset += readSamples;
+
+		return readSamples;
 }

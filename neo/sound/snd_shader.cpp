@@ -332,7 +332,7 @@ bool idSoundShader::ParseShader( idLexer &src ) {
 				leadins[ numLeadins ] = soundSystemLocal.soundCache->FindSound( token.c_str(), onDemand );
 				numLeadins++;
 			}
-		} else if ( token.Find( ".wav", false ) != -1 || token.Find( ".ogg", false ) != -1 ) {
+		} else if ( token.Find( ".wav", false ) != -1 || token.Find( ".ogg", false ) != -1 || token.Find(".mp3", false) != -1 ) {
 			// add to the wav list
 			if ( soundSystemLocal.soundCache && numEntries < maxSamples ) {
 				token.BackSlashesToSlashes();
@@ -349,8 +349,14 @@ bool idSoundShader::ParseShader( idLexer &src ) {
 						work.SetFileExtension( ".ogg" );
 						if ( fileSystem->ReadFile( work, NULL, NULL ) > 0 ) {
 							token = work;
+						} // Is this sensible Dynamix
+						else {
+							work.SetFileExtension(".mp3");
+							if (fileSystem->ReadFile(work, NULL, NULL) > 0) {
+								token = work;
+							}
 						}
-					}
+					}  
 				}
 				entries[ numEntries ] = soundSystemLocal.soundCache->FindSound( token.c_str(), onDemand );
 				numEntries++;

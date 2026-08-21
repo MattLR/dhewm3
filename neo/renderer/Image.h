@@ -163,7 +163,8 @@ typedef enum {
 typedef enum {
 	CF_2D,			// not a cube map
 	CF_NATIVE,		// _px, _nx, _py, etc, directly sent to GL
-	CF_CAMERA		// _forward, _back, etc, rotated and flipped as needed before sending to GL
+	CF_CAMERA,		// _forward, _back, etc, rotated and flipped as needed before sending to GL
+	CF_CAMERAJK,	// Same as above but JK image names
 } cubeFiles_t;
 
 #define	MAX_IMAGE_NAME	256

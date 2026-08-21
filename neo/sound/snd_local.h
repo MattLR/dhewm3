@@ -39,6 +39,9 @@ If you have questions concerning this license or the applicable additional terms
 #define AL_DISABLE_NOEXCEPT
 #endif
 
+//Dynamix
+#include "dr_mp3.h"
+
 #include <AL/al.h>
 #include <AL/alc.h>
 #include <AL/alext.h>
@@ -154,7 +157,8 @@ typedef waveformat_s waveformat_t;
 /* flags for wFormatTag field of WAVEFORMAT */
 enum {
 	WAVE_FORMAT_TAG_PCM		= 1,
-	WAVE_FORMAT_TAG_OGG		= 2
+	WAVE_FORMAT_TAG_OGG		= 2,
+	WAVE_FORMAT_TAG_MP3		= 3
 };
 
 /* specific waveform format structure for PCM data */
@@ -246,12 +250,20 @@ private:
 	byte*			oggData; // the contents of the .ogg for stbi_vorbis (it doesn't support custom reading callbacks)
 	bool			isOgg;
 
+	drmp3*			mp3;			// only !NULL when !s_realTimeDecoding
+	byte*			mp3Data; // the contents of the .ogg for stbi_vorbis (it doesn't support custom reading callbacks)
+	bool			isMp3;
+
 private:
 	int				ReadMMIO( void );
 
 	int				OpenOGG( const char* strFileName, waveformatex_t* pwfx = NULL );
 	int				ReadOGG( byte* pBuffer, int dwSizeToRead, int *pdwSizeRead );
 	int				CloseOGG( void );
+
+	int				OpenMP3(const char* strFileName, waveformatex_t* pwfx = NULL);
+	int				ReadMP3(byte* pBuffer, int dwSizeToRead, int* pdwSizeRead);
+	int				CloseMP3(void);
 };
 
 

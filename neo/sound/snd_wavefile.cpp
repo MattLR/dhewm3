@@ -47,6 +47,9 @@ idWaveFile::idWaveFile( void ) {
 	ogg			= NULL;
 	isOgg		= false;
 	oggData		= NULL;
+	mp3			= NULL;
+	isMp3		= false;
+	mp3Data		= NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -84,6 +87,12 @@ int idWaveFile::Open( const char* strFileName, waveformatex_t* pwfx ) {
 	name.SetFileExtension( ".ogg" );
 	if ( fileSystem->ReadFile( name, NULL, NULL ) != -1 ) {
 		return OpenOGG( name, pwfx );
+	}
+
+	// Dynamix
+	name.SetFileExtension(".mp3");
+	if (fileSystem->ReadFile(name, NULL, NULL) != -1) {
+		return OpenMP3(name, pwfx);
 	}
 
 	memset( &mpwfx, 0, sizeof( waveformatextensible_t ) );
@@ -170,6 +179,7 @@ int idWaveFile::ReadMMIO( void ) {
 			return -1;
 		}
 		assert( !isOgg );
+		assert(!isMp3);
 		ckIn.ckid = LittleInt( ckIn.ckid );
 		ckIn.cksize = LittleInt( ckIn.cksize );
 		ckIn.dwDataOffset += ckIn.cksize-8;
@@ -186,6 +196,7 @@ int idWaveFile::ReadMMIO( void ) {
 		return -1;
 	}
 	assert( !isOgg );
+	assert(!isMp3);
 	pcmWaveFormat.wf.wFormatTag = LittleShort( pcmWaveFormat.wf.wFormatTag );
 	pcmWaveFormat.wf.nChannels = LittleShort( pcmWaveFormat.wf.nChannels );
 	pcmWaveFormat.wf.nSamplesPerSec = LittleInt( pcmWaveFormat.wf.nSamplesPerSec );
@@ -272,6 +283,10 @@ int idWaveFile::Read( byte* pBuffer, int dwSizeToRead, int *pdwSizeRead ) {
 
 		return ReadOGG( pBuffer, dwSizeToRead, pdwSizeRead );
 
+	} else if (mp3 != NULL) {
+
+		return ReadMP3(pBuffer, dwSizeToRead, pdwSizeRead);
+
 	} else if ( mbIsReadingFromMemory ) {
 
 		if( mpbDataCur == NULL ) {
@@ -300,6 +315,7 @@ int idWaveFile::Read( byte* pBuffer, int dwSizeToRead, int *pdwSizeRead ) {
 
 		dwSizeToRead = mhmmio->Read( pBuffer, dwSizeToRead );
 		// this is hit by ogg code, which does it's own byte swapping internally
+		// Dynamix - check for MP3 FIXME
 		if ( !isOgg ) {
 			LittleRevBytes( pBuffer, 2, dwSizeToRead / 2 );
 		}
@@ -320,7 +336,10 @@ int idWaveFile::Close( void ) {
 	if ( ogg != NULL ) {
 		return CloseOGG();
 	}
-	if( mhmmio != NULL ) {
+	if (mp3 != NULL) {
+		return CloseMP3();
+	}
+	if ( mhmmio != NULL ) {
 		fileSystem->CloseFile( mhmmio );
 		mhmmio = NULL;
 	}
@@ -336,7 +355,7 @@ int idWaveFile::Seek( int offset ) {
 
 		common->FatalError( "idWaveFile::Seek: cannot seek on an OGG file\n" );
 
-	} else if( mbIsReadingFromMemory ) {
+	} else if ( mbIsReadingFromMemory ) {
 
 		mpbDataCur = mpbData + offset;
 

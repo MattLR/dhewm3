@@ -969,6 +969,10 @@ void idMaterial::ParseFragmentMap( idLexer &src, newShaderStage_t *newStage ) {
 			cubeMap = CF_CAMERA;
 			continue;
 		}
+		if (!token.Icmp("cameraCubeMapJK")) {
+			cubeMap = CF_CAMERAJK;
+			continue;
+		}
 		if ( !token.Icmp( "nearest" ) ) {
 			tf = TF_NEAREST;
 			continue;
@@ -1224,6 +1228,13 @@ void idMaterial::ParseStage( idLexer &src, const textureRepeat_t trpDefault ) {
 			str = R_ParsePastImageProgram( src );
 			idStr::Copynz( imageName, str, sizeof( imageName ) );
 			cubeMap = CF_CAMERA;
+			continue;
+		}
+
+		if (!token.Icmp("cameraCubeMapJK")) {
+			str = R_ParsePastImageProgram(src);
+			idStr::Copynz(imageName, str, sizeof(imageName));
+			cubeMap = CF_CAMERAJK;
 			continue;
 		}
 

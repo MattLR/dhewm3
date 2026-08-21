@@ -1335,13 +1335,15 @@ void idRenderModelMDX::LoadModel(void) {
 		return;
 	}
 
-	// If we don't have any frames, then render as a static mesh.
-	//if (modelData->numFrames == 1)
-	//{
-		//viewDef_t view;
-		//RenderFramesToModel(this, &view, 1, 0, NULL);
+	if (!isStatic) {
+	// Convert the anims to md5 if it doesn't exist
+		WriteAnimToDisk();
+	}
 
-	//}
+	// If this is static generate the surfaces
+	if (isStatic) {
+		CreateSurfaces();
+	}
 
 	// Free the memory from reading in the ifle.
 	fileSystem->FreeFile(mdxMeshBuffer);
@@ -1407,7 +1409,7 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 	mdxm->ofsEnd = LittleLong(pinmodel->ofsEnd);
 	mdxm->ofsSurfHierarchy = LittleLong(pinmodel->ofsSurfHierarchy);
 
-	if (idStr::Icmp(mdxm->animName, "*default") == 0) {
+	if (idStr::Icmp(mdxm->animName, sDEFAULT_GLA_NAME) == 0) {
 		common->DPrintf("Static model\n");
 		isStatic = true;
 	}
@@ -1422,7 +1424,7 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 
 		//common->Printf("surfHier name %s, # children %d\n", surfHeader->name, surfHeader->numChildren);
 
-		// Raven models are missing the first letter for some reason - I'm suring I'm not doing this efficiently but it works
+		// Raven models are missing the first letter for some reason - I'm sure I'm not doing this efficiently but it works
 		char* test = surfHeader->shader;
 		if (test[0] == '\0') {
 			// Check following bytes manually
@@ -1543,8 +1545,48 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 			joints[i].name = "origin";
 			joints[i].parent = NULL;
 		} else {
-			joints[i].name = va("bone%d", i);
-			joints[i].parent = &joints[0];
+			joints[i].name = GLA_STORED_BASEPOSE_JOINTS[i].name;
+			joints[i].parent = &joints[GLA_STORED_BASEPOSE_JOINTS[i].parent];
+		}
+	}
+
+	// GLA load testing
+	if (!isStatic) {
+		LoadAnim();
+		mdxaSkel_t* thisBoneInfo;
+		mdxaSkelOffsets_t* offsets = (mdxaSkelOffsets_t*)((byte*)animData + sizeof(mdxaHeader_t));
+
+		//header = (mdxaHeader_t*)animData;
+
+		//bones = (mdxaSkel_t*)((byte*)animData + animData->ofsSkel);
+		//bones = (mdxaSkel_t*)((byte*)header + header->ofsSkel);
+		float fscale = animData->fScale;
+
+		for (int i = 0; i < animData->numBones; i++) {
+			thisBoneInfo = (mdxaSkel_t*)((byte*)animData + sizeof(mdxaHeader_t) + offsets->offsets[i]);
+			//common->Printf("Bone name %s, parent num %d, num children %d\n", thisBoneInfo->name, thisBoneInfo->parent, thisBoneInfo->numChildren);
+
+			idJointMat testJointMat;
+			idMat3 rotMatrix;
+
+			for (int r = 0; r < 3; r++) {
+				for (int c = 0; c < 3; c++) {
+					rotMatrix[r][c] = thisBoneInfo->BasePoseMat.matrix[c][r]/fscale;
+				}
+			}
+
+			idVec3 translationVec(thisBoneInfo->BasePoseMat.matrix[0][3], thisBoneInfo->BasePoseMat.matrix[1][3], thisBoneInfo->BasePoseMat.matrix[2][3]);
+
+			testJointMat.SetRotation(rotMatrix);
+			testJointMat.SetTranslation(translationVec);
+
+			idJointQuat JointQuat = testJointMat.ToJointQuat();
+			idCQuat cQuat = JointQuat.q.ToCQuat();
+			//common->Printf("CQuats( %f %f %f ) ( %f %f %f )\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+			float *m = testJointMat.ToFloatPtr();
+			//common->Printf("Matrix %f %f %f %f %f %f %f %f %f %f %f %f\n", m[0], m[1], m[2],
+			//	m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11]);
+
 		}
 	}
 
@@ -1557,6 +1599,9 @@ idRenderModelMDX::IsDynamicModel
 =================
 */
 dynamicModel_t idRenderModelMDX::IsDynamicModel() const {
+	if (isStatic) {
+		return DM_STATIC;
+	}
 	return DM_CACHED;
 }
 
@@ -1701,8 +1746,8 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 		}
 
 
-
-		if (0) {
+		// I don't think it's possible for there not to be an ent here
+		if (1) {
 		//if (ent) {
 			idJointMat bone;
 			numVerts = surface->numVerts;
@@ -1715,8 +1760,8 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 
 			//GLA_BuildSkinMatricesFromStoredInverseBasePose(ent->joints, superJoints);
 			//GLA_Skin(ent->joints, superJoints);
-			//GLA_Skin2(ent->joints, superJoints);
-			BuildSkinMatrices_Doom3(ent->joints, superJoints);
+			GLA_Skin2(ent->joints, superJoints);
+			//BuildSkinMatrices_Doom3(ent->joints, superJoints);
 
 			for (j = 0; j < numVerts; j++) {
 				idVec3	tempVert, tempNormal;
@@ -1740,9 +1785,13 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 					//bone = superJoints[boneNum];
 
 					// Check if this needs transposing
-					rotMatrix = bone.ToMat3().Transpose();
-					//rotMatrix = bone.ToMat3();
+					//rotMatrix = bone.ToMat3().Transpose();
+					rotMatrix = bone.ToMat3();
 
+					idVec3 testm;
+					testm.x = -v->vertCoords.y;
+					testm.y = v->vertCoords.x;
+					testm.z = v->vertCoords.z;
 					idVec3 localCoords = GLA_ModelToJointLocal_FromAbs12(
 						v->vertCoords,
 						GLA_STORED_BASEPOSE_JOINTS[boneNum].basePoseMat
@@ -1761,27 +1810,46 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 					idRotation rot2(origin, axis2, angle);
 					idRotation rot3(origin, axis3, 0);
 
-					test.x = localCoords.x;
-					test.y = localCoords.y;
+					test.x = -localCoords.y;
+					test.y = localCoords.x;
 					test.z = localCoords.z;
 					//idVec3 skinned = TransformPointByJointMatRaw(bone, v->vertCoords);
 					idVec3 rotated = rot * test;
 					idVec3 rotated2 = rot2 * rotated;
 					idVec3 rotated3 = rot * rotated2;
 
+
+					// Standard skinning 
+					//tempVert[0] += boneWeight * (DotProduct(rotMatrix[0], v->vertCoords) + bone.ToVec3().x);
+					//tempVert[1] += boneWeight * (DotProduct(rotMatrix[1], v->vertCoords) + bone.ToVec3().y);
+					//tempVert[2] += boneWeight * (DotProduct(rotMatrix[2], v->vertCoords) + bone.ToVec3().z);
+
+					// I don't remember what skinned was meant to be
 					//tempVert[0] += boneWeight * skinned.x;
 					//tempVert[1] += boneWeight * skinned.y;
 					//tempVert[2] += boneWeight * skinned.z;
 
-					tempVert[0] += boneWeight * (DotProduct(rotMatrix[0], rotated) + bone.ToVec3().x);
-					tempVert[1] += boneWeight * (DotProduct(rotMatrix[1], rotated) + bone.ToVec3().y);
-					tempVert[2] += boneWeight * (DotProduct(rotMatrix[2], rotated) + bone.ToVec3().z);
+					//This was when I was trying to rotate stuff and uses local coords?
+					//tempVert[0] += boneWeight * (DotProduct(rotMatrix[0], rotated) + bone.ToVec3().x);
+					//tempVert[1] += boneWeight * (DotProduct(rotMatrix[1], rotated) + bone.ToVec3().y);
+					//tempVert[2] += boneWeight * (DotProduct(rotMatrix[2], rotated) + bone.ToVec3().z);
 
+					// I think this is how local coords should be?
+					tempVert[0] += boneWeight * (DotProduct(rotMatrix[0], localCoords) + bone.ToVec3().x);
+					tempVert[1] += boneWeight * (DotProduct(rotMatrix[1], localCoords) + bone.ToVec3().y);
+					tempVert[2] += boneWeight * (DotProduct(rotMatrix[2], localCoords) + bone.ToVec3().z);
+
+					// Local coords using x y forward fix
+					//tempVert[0] += boneWeight * (DotProduct(rotMatrix[0], test) + bone.ToVec3().x);
+					//tempVert[1] += boneWeight * (DotProduct(rotMatrix[1], test) + bone.ToVec3().y);
+					//tempVert[2] += boneWeight * (DotProduct(rotMatrix[2], test) + bone.ToVec3().z);
+
+					// This was test to see if matrix access was weird, it wasn't
 					//const float* m = bone.ToFloatPtr();
 
 					//tempVert[0] += boneWeight * (m[0] * v->vertCoords[0] + m[1] * v->vertCoords[1] + m[2] * v->vertCoords[2] + m[3]);
 					//tempVert[1] += boneWeight * (m[4] * v->vertCoords[0] + m[5] * v->vertCoords[1] + m[6] * v->vertCoords[2] + m[7]);
-				//	tempVert[2] += boneWeight * (m[8] * v->vertCoords[0] + m[9] * v->vertCoords[1] + m[10] * v->vertCoords[2] + m[11]);
+					//tempVert[2] += boneWeight * (m[8] * v->vertCoords[0] + m[9] * v->vertCoords[1] + m[10] * v->vertCoords[2] + m[11]);
 
 					//tempVert[0] = v->vertCoords[0];
 					//tempVert[1] = v->vertCoords[1];
@@ -1795,6 +1863,12 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 				tri->verts[j].xyz[0] = tempVert[0];
 				tri->verts[j].xyz[1] = tempVert[1];
 				tri->verts[j].xyz[2] = tempVert[2];
+
+				// Makes it face in the right direction, doesn't fix matrix thing, I'll try using gla stuff now
+				// Also the skeleton and bounds now have no relation to the model, not ideal, should fix on loading skeleton
+				//tri->verts[j].xyz[0] = -tempVert[1];
+				//tri->verts[j].xyz[1] = tempVert[0];
+				//tri->verts[j].xyz[2] = tempVert[2];
 
 				//tri->verts[j].normal[0] = tempNormal[0];
 				//tri->verts[j].normal[1] = tempNormal[1];
@@ -1835,7 +1909,7 @@ void idRenderModelMDX::RenderFramesToModel(idRenderModelStatic* staticModel, con
 		} 
 		
 		// If it's a static mesh just do this 
-		if (1) {
+		if (0) {
 			idVec3	tempVert, tempNormal;
 
 			tempVert.Zero();
@@ -2027,4 +2101,434 @@ idRenderModelMDX::NearestJoint
 */
 int	idRenderModelMDX::NearestJoint(int surfaceNum, int a, int b, int c) const {
 	return 0;
+}
+
+/*
+=============
+idRenderModelMDX::CreateSurfaces
+=============
+*/
+void idRenderModelMDX::CreateSurfaces() {
+	int				i, j, k;
+	float			frontlerp, backlerp;
+	int* triangles;
+	int				indexes;
+	int				numVerts;
+	mdxmVertex_t* v, * verts;
+	mdxmVertexTexCoord_t* tcs, * tc;
+	mdxmHeader_t* header;
+	header = modelData;
+	mdxmSurfHierarchy_t* surfHeader;
+	mdxmLOD_t* lod = (mdxmLOD_t*)((byte*)header + header->ofsLODs);
+	mdxmSurface_t* surface = (mdxmSurface_t*)((byte*)lod + sizeof(mdxmLOD_t) + (header->numSurfaces * sizeof(mdxmLODSurfOffset_t)));
+
+
+	this->bounds.Clear();
+
+	for (int i = 0; i < header->numSurfaces; i++) {
+		srfTriangles_t* tri = R_AllocStaticTriSurf();
+		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
+		R_AllocStaticTriSurfIndexes(tri, surface->numTriangles * 3);
+		tri->bounds.Clear();
+
+		modelSurface_t	surf;
+
+		surf.id = i;
+		surf.geometry = tri;
+
+		surf.shader = materials[i];
+
+		// Set up all triangles.
+		triangles = (int*)((byte*)surface + surface->ofsTriangles);
+		indexes = surface->numTriangles * 3;
+		for (j = 0; j < indexes; j++) {
+			tri->indexes[j] = triangles[j];
+		}
+
+		tri->numIndexes = indexes;
+
+		int* boneRefs = (int*)((byte*)surface + surface->ofsBoneReferences);
+
+
+		// If it's a static mesh just do this 
+		if (1) {
+			idVec3	tempVert, tempNormal;
+
+			tempVert.Zero();
+			tempNormal.Zero();
+			numVerts = surface->numVerts;
+
+			verts = (mdxmVertex_t*)((byte*)surface + surface->ofsVerts);
+			tcs = (mdxmVertexTexCoord_t*)((byte*)verts + surface->numVerts * sizeof(mdxmVertex_t));
+
+
+			for (j = 0; j < numVerts; j++) {
+				idVec3	tempVert, tempNormal;
+				v = &verts[j];
+				tc = &tcs[j];
+
+				//real
+				//tempVert[0] = v->vertCoords[0];
+				//tempVert[1] = v->vertCoords[1];
+				//tempVert[2] = v->vertCoords[2];
+				//Rot test
+
+				tempVert[0] = -v->vertCoords[1];
+				tempVert[1] = v->vertCoords[0];
+				tempVert[2] = v->vertCoords[2];
+
+				tri->verts[j].xyz[0] = tempVert[0];
+				tri->verts[j].xyz[1] = tempVert[1];
+				tri->verts[j].xyz[2] = tempVert[2];
+
+				//tri->verts[j].normal[0] = tempNormal[0];
+				//tri->verts[j].normal[1] = tempNormal[1];
+				//tri->verts[j].normal[2] = tempNormal[2];
+
+				//R_VaoPackNormal(tess.normal[baseVertex + j], tempNormal);
+
+				tri->verts[j].st[0] = tc->texCoords[0];
+				tri->verts[j].st[1] = tc->texCoords[1];
+
+			}
+
+			//tess.numVertexes += surface->numVerts;
+			tri->numVerts += surface->numVerts;
+
+
+			//baseVertex += surface->numVerts;
+			//baseIndex += surface->numTriangles * 3;
+
+			R_BoundTriSurf(tri);
+			R_DeriveTangents(tri);
+
+			// Dynamix - model skins are different between Q3/Doom 3
+			// Generally Q3 derivates use mesh based skinning vs Doom 3
+			// texture based overrides and RTCW/ET don't provide a 
+			// default value for the shader
+			// Long term I will do something mesh based directly, for now
+			// I'll just fill in a material name per surface based on surface name 
+			// or index that I can override
+			//surf.shader = declManager->FindMaterial(surfHeader->name);
+			//surf.shader = declManager->FindMaterial("models/players/rebel/rebel_torso");
+
+			this->AddSurface(surf);
+
+			this->bounds.AddPoint(surf.geometry->bounds[0]);
+			this->bounds.AddPoint(surf.geometry->bounds[1]);
+		}
+		surface = (mdxmSurface_t*)((byte*)surface + surface->ofsEnd);
+	}
+}
+
+/*
+========================
+idRenderModelMDX::LoadAnim
+========================
+*/
+void idRenderModelMDX::LoadAnim(void) {
+	void* mdxMeshBuffer;
+	int mdxMeshLen;
+
+	// Try and load the file off disk.
+	//idStr anim2 = "models/players/_humanoid_academy1/_humanoid_academy1.gla";
+	idStr anim2 = "models/players/_humanoid/_humanoid.gla";
+	// common->Printf("Trying to load anim%s\n", modelData->animName);
+	mdxMeshLen = fileSystem->ReadFile(anim2, &mdxMeshBuffer);
+	if (mdxMeshLen <= 0 || mdxMeshBuffer == nullptr)
+	{
+		common->Warning("Failed to load MDXA anim %s\n", name.c_str());
+		MakeDefaultModel();
+		return;
+	}
+
+	// Parse the MDX file.
+
+	if (!LoadMDXA(mdxMeshBuffer, mdxMeshLen))
+	{
+		fileSystem->FreeFile(mdxMeshBuffer);
+		return;
+	}
+
+	// Free the memory from reading in the ifle.
+	fileSystem->FreeFile(mdxMeshBuffer);
+}
+
+/*
+========================
+idRenderModelMDX::LoadMDXA
+========================
+*/
+bool idRenderModelMDX::LoadMDXA(void* buffer, int filesize) {
+	int					i, j, k, l;
+	mdxaHeader_t		*pinmodel, *mdxa;
+	int					version;
+	int					size;
+
+	const char* mod_name = name.c_str();
+
+	pinmodel = (mdxaHeader_t*)buffer;
+
+	version = LittleLong(pinmodel->version);
+	if (version != MDXA_VERSION)
+	{
+		common->Warning("R_LoadMDXA: %s has wrong version (%i should be %i)\n", mod_name, pinmodel->version, MDXM_VERSION);
+		return false;
+	}
+
+	size = LittleLong(pinmodel->ofsEnd);
+
+	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+
+	if (size > filesize)
+	{
+		common->Warning("R_LoadMDXA: Header of %s is broken. Wrong filesize declared!\n", mod_name);
+		return false;
+	}
+
+	//Fix all this, you can just memcpy and then fix it after
+	LL(pinmodel->numFrames);
+
+	dataSize += size;
+	animData = mdxa = (mdxaHeader_t*)Mem_Alloc(size);
+
+	memcpy(mdxa, buffer, LittleLong(pinmodel->ofsEnd));
+
+	// Copy all the values over from the file and fix endian issues in the process, if necessary.
+
+	mdxa->ident = LittleLong(pinmodel->ident);
+	mdxa->version = pinmodel->version;	// Don't need to swap byte order on this one, we already did above.
+	strcpy(mdxa->name, pinmodel->name);
+	mdxa->ofsEnd = LittleLong(pinmodel->ofsEnd);
+
+
+	common->DPrintf("MDXA Version %d\nanim file %s\nscale %f\nnum frames %d\nnum bones %d\n", mdxa->version, mdxa->name, mdxa->fScale, mdxa->numFrames, mdxa->numBones);
+
+	return true;
+}
+
+/*
+=================
+idRenderModelMDX::WriteAnimToDisk
+=================
+*/
+bool idRenderModelMDX::WriteAnimToDisk() {
+	//return true;
+	idFile* fp;
+	int frameSize, numFrames, numFrames1, numAnims, numBones;
+	mdrHeader_t* header;
+	mdrFrame_t* frame;
+
+	// Just dumping the whole animation right now for testing
+	/*
+	//idList <animInfo_t> animInfo;
+
+	//animInfo.SetGranularity(1);
+	//animInfo.SetNum(0);
+	//numAnims = 0;
+
+	//ParseAnims(animInfo, numAnims);
+
+	header = (mdrHeader_t*)modelData;
+	numBones = header->numBones;
+	numFrames = header->numFrames;
+
+	//frame = frames[0];
+
+	// FIXME - hack to make sure we're not reading the wrong set of anims right now
+	for (int i = numAnims - 1; i > 0; i--) {
+		//int startFrame = animInfo[c].animInfo[0];
+		//int numFrames = animInfo[c].animInfo[1];
+		int x = animInfo[i].animInfo[0] + animInfo[i].animInfo[1];
+		if (x > numFrames) {
+			animInfo.RemoveIndex(i);
+		}
+	}
+
+	numAnims = animInfo.Num();
+	*/
+	numAnims = 1;
+	numBones = animData->numBones;
+	numFrames1 = animData->numFrames;
+	common->Printf("Num frames %d\n", animData->numFrames);
+
+	idList <idJointMat> boneData;
+	boneData.SetGranularity(1);
+	boneData.SetNum(numBones);
+
+	CalcBones(boneData, 0);
+
+	// Checking if file exists to see if we need to generate anim for now, may move to one file check or something in future
+	for (int c = 0; c < numAnims; c++) {
+		idStr animName;
+		int startFrame = 0;
+		int numFrames = numFrames1;
+		//idStr uplow = "models/players/_humanoid_academy1/_humanoid_academy1.gla";
+		idStr uplow = "models/players/_humanoid/_humanoid.gla";
+
+		// Eliteforce uses the same animcfg for both upper and lower models
+		// Adding a folder so the anims don't overwrite each other
+		//uplow.StripPath();
+		uplow.StripFileExtension();
+
+		//uplow.ExtractFilePath(animName);
+		//animName.Append(va("%s/", uplow.c_str()));
+		animName.Append(va("%s", uplow.c_str()));
+		//animName.Append("test");
+		animName.Append(".md5anim");
+		common->DPrintf("animName for writing %s\n", animName.c_str());
+
+		if (findFile_t test = fileSystem->FindFile(animName, 0)) {
+			common->DPrintf("Found file for anim #%d for MDX model, skipping file generation\n", c);
+			continue;
+		}
+
+		common->DPrintf("Writing %s\n", animName.c_str());
+		fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
+
+		if (!fp) {
+			common->Warning("WriteAnims: Error opening file %s\n", name.c_str());
+			return false;
+		}
+
+		fp->WriteFloatString("MD5Version 10\n\ncommandline \"\"\n");
+		int framerate = 24;
+		fp->WriteFloatString("numFrames %d\n", numFrames);
+		fp->WriteFloatString("numJoints %d\n", numBones);
+		fp->WriteFloatString("frameRate %d\n", framerate);
+		fp->WriteFloatString("numAnimatedComponents %d\n\n", numBones * 6);
+
+		fp->WriteFloatString("hierarchy {\n");
+
+		for (int i = 0; i < numBones; i++) {
+			if (i == 0) {
+				fp->WriteFloatString("\t\"origin\" -1 63 0\n");
+			}
+			else {
+				fp->WriteFloatString("\t\"%s\" %d 63 %d\n", joints[i].name.c_str(), GLA_STORED_BASEPOSE_JOINTS[i].parent, i * 6);
+			}
+		}
+
+		fp->WriteFloatString("}\n\n");
+		fp->WriteFloatString("bounds {\n");
+		for (int i = 0, j = startFrame; i < numFrames; i++, j++) {
+			//FIXME Dynamix
+			idVec3 bounds, bounds2;
+			bounds.x = -24;
+			bounds2.x = 24;
+			bounds.y = -24;
+			bounds2.y = 24;
+			bounds.z = 0;
+			bounds2.z = 64;
+
+			fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", bounds.x, bounds.y, bounds.z, bounds2.x, bounds2.y, bounds2.z);
+		}
+		fp->WriteFloatString("}\n\n");
+		CalcBones(boneData, 0);
+		fp->WriteFloatString("baseframe {\n");
+		for (int i = 0; i < numBones; i++) {
+			idJointQuat JointQuat = boneData[i].ToJointQuat();
+			idCQuat cQuat = JointQuat.q.ToCQuat();
+			fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+		}
+		fp->WriteFloatString("}\n\n");
+
+		for (int i = 0, j = startFrame; i < numFrames; i++, j++) {
+			CalcBones(boneData, j);
+			fp->WriteFloatString("frame %d {\n", i);
+			for (int k = 0; k < numBones; k++) {
+				idJointQuat JointQuat = boneData[k].ToJointQuat();
+				idCQuat cQuat = JointQuat.q.ToCQuat();
+
+				int newlineCounter = 0;
+				fp->WriteFloatString("%f %f %f %f %f %f\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+			}
+			fp->WriteFloatString("}\n\n");
+		}
+
+		fileSystem->CloseFile(fp);
+	}
+	return false;
+}
+
+/*
+========================
+idRenderModelMDX::CalcBones
+========================
+*/
+void idRenderModelMDX::CalcBones(idList<idJointMat>& boneData, int currentFrame) {
+	int numBones;
+	//mdrHeader_t* header;
+
+	//common->Printf("Calcbones\n");
+	//header = (mdrHeader_t*)animData;
+	numBones = animData->numBones;
+
+	for (int i = 0; i < numBones; i++) {
+		float test[3][4];
+
+		UnCompressBone(test, i, animData, currentFrame);
+		idMat3 rotMatrix;
+
+		for (int r = 0; r < 3; r++) {
+			for (int c = 0; c < 3; c++) {
+				rotMatrix[r][c] = test[c][r];
+			}
+		}
+
+		idVec3 translationVec(test[0][3], test[1][3], test[2][3]);
+
+		boneData[i].SetRotation(rotMatrix);
+		boneData[i].SetTranslation(translationVec);
+		//boneData[i] *= baseJointMat;
+		//boneData[i] = (baseJointMat *= boneData[i]);
+		if (i > 0) {
+			idJointMat tmp = boneData[GLA_STORED_BASEPOSE_JOINTS[i].parent];
+			tmp *= boneData[i];
+			boneData[i] = tmp;
+			//boneData[i] = (boneData[GLA_STORED_BASEPOSE_JOINTS[i].parent] *= boneData[i]);
+			//boneData[i] *= boneData[GLA_STORED_BASEPOSE_JOINTS[i].parent];
+		}
+	}
+
+	// Only fine if parent is always earlier in the joint layout
+	// which Doom 3 expects anyway
+	// Untransform the joints to .md5anim format
+
+
+	for (int i = 0; i < numBones; i++) {
+		mdxaSkel_t* thisBoneInfo;
+		mdxaSkelOffsets_t* offsets = (mdxaSkelOffsets_t*)((byte*)animData + sizeof(mdxaHeader_t));
+
+		thisBoneInfo = (mdxaSkel_t*)((byte*)animData + sizeof(mdxaHeader_t) + offsets->offsets[i]);
+
+		float fscale = animData->fScale;
+		//float fscale = 1.0f;
+
+		idJointMat baseJointMat;
+		idMat3 baseRotMatrix;
+
+		for (int r = 0; r < 3; r++) {
+			for (int c = 0; c < 3; c++) {
+				baseRotMatrix[r][c] = thisBoneInfo->BasePoseMat.matrix[r][c] / fscale;
+			}
+		}
+		idVec3 translationVec1(thisBoneInfo->BasePoseMat.matrix[0][3] / fscale, thisBoneInfo->BasePoseMat.matrix[1][3] / fscale, thisBoneInfo->BasePoseMat.matrix[2][3] / fscale);
+
+		baseJointMat.SetRotation(baseRotMatrix);
+		baseJointMat.SetTranslation(translationVec1);
+
+		//boneData[i] = (baseJointMat *= boneData[i]);
+		//boneData[i] *= baseJointMat;
+
+		idJointMat tmp = baseJointMat;
+		tmp *= boneData[i];
+		boneData[i] = tmp;
+	}
+
+	//FIX ME PROPERLY - might not need if I just don't transform them?
+	// Diving through is right, the rotations are basically correct but transforms are off - maybe scaling?
+	for (int i = numBones - 1; i > 0; i--) {
+		boneData[i] /= boneData[GLA_STORED_BASEPOSE_JOINTS[i].parent];
+	}
 }

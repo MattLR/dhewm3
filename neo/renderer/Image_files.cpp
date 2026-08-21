@@ -987,8 +987,10 @@ Loads six files with proper extensions
 */
 bool R_LoadCubeImages( const char *imgName, cubeFiles_t extensions, byte *pics[6], int *outSize, ID_TIME_T *timestamp ) {
 	int		i, j;
-	const char	*cameraSides[6] =  { "_forward.tga", "_back.tga", "_left.tga", "_right.tga",
-		"_up.tga", "_down.tga" };
+	const char* cameraSides[6] = { "_forward.tga", "_back.tga", "_left.tga", "_right.tga",
+	"_up.tga", "_down.tga" };
+	const char* cameraSidesJK[6] = { "_rt.tga",  "_lf.tga", "_bk.tga", "_ft.tga",
+	"_up.tga", "_dn.tga" };
 	const char	*axisSides[6] =  { "_px.tga", "_nx.tga", "_py.tga", "_ny.tga",
 		"_pz.tga", "_nz.tga" };
 	const char	**sides;
@@ -997,6 +999,8 @@ bool R_LoadCubeImages( const char *imgName, cubeFiles_t extensions, byte *pics[6
 
 	if ( extensions == CF_CAMERA ) {
 		sides = cameraSides;
+	} else if (extensions == CF_CAMERAJK){
+		sides = cameraSidesJK;
 	} else {
 		sides = axisSides;
 	}
@@ -1026,15 +1030,36 @@ bool R_LoadCubeImages( const char *imgName, cubeFiles_t extensions, byte *pics[6
 			size = width;
 		}
 		if ( width != size || height != size ) {
-			common->Warning( "Mismatched sizes on cube map '%s'", imgName );
-			break;
+			//common->Warning( "Mismatched sizes on cube map '%s'", imgName );
+			//break;
+			common->Warning( "Resampled cube map size '%s'", imgName );
+
+			//byte* resampled = new byte[size * size * 4];
+			byte* resampled;
+
+			resampled = R_ResampleTexture(
+				pics[i],
+				width,
+				height,
+				size,
+				size
+			);
+
+			R_StaticFree(pics[i]);
+			//*pic = resampledBuffer;
+
+			//delete[] pics[i];
+			pics[i] = resampled;
+
+			width = size;
+			height = size;
 		}
 		if ( timestamp ) {
 			if ( thisTime > *timestamp ) {
 				*timestamp = thisTime;
 			}
 		}
-		if ( pics && extensions == CF_CAMERA ) {
+		if ( pics && ( extensions == CF_CAMERA || extensions == CF_CAMERAJK ) ) {
 			// convert from "camera" images to native cube map images
 			switch( i ) {
 			case 0:	// forward

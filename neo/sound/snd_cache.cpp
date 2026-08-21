@@ -420,6 +420,11 @@ ID_TIME_T idSoundSample::GetNewTimeStamp( void ) const {
 		oggName.SetFileExtension( ".ogg" );
 		fileSystem->ReadFile( oggName, NULL, &timestamp );
 	}
+	if (timestamp == FILE_NOT_FOUND_TIMESTAMP) {
+		idStr oggName = name;
+		oggName.SetFileExtension(".mp3");
+		fileSystem->ReadFile(oggName, NULL, &timestamp);
+	}
 	return timestamp;
 }
 
@@ -438,7 +443,7 @@ void idSoundSample::Load( void ) {
 	timestamp = GetNewTimeStamp();
 
 	if ( timestamp == FILE_NOT_FOUND_TIMESTAMP ) {
-		common->Warning( "Couldn't load sound '%s' using default", name.c_str() );
+		common->Warning( "Couldn't load sound TS '%s' using default", name.c_str() );
 		MakeDefault();
 		return;
 	}

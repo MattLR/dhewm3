@@ -558,7 +558,15 @@ public:
 	virtual void				SetJoint(int index, int parentNum, idStr name);
 private:
 	bool						LoadMDXFile(void* buffer, int filesize);
+	bool						LoadMDXA(void* buffer, int filesize);
+	void						LoadAnim();
+	void						CalcBones(idList<idJointMat>& boneData, int currentFrame);
+	//void						ParseAnims(idList <animInfo_t>& animInfo, int& numAnims);
+	bool						WriteAnimToDisk();
 	void						RenderFramesToModel(idRenderModelStatic* staticModel, const struct viewDef_s* view, int scale, int frame, const renderEntity_t* ent2);
+	void						CreateSurfaces(void);
+
+
 
 	idList<idMD5Joint>			joints;
 	idList<idJointQuat>			defaultPose;
@@ -572,6 +580,7 @@ private:
 
 	int							dataSize;
 	struct mdxmHeader_t*		modelData;
+	struct mdxaHeader_t*		animData;
 	bool						doOnce = true;
 	bool						isStatic = false;
 
@@ -582,6 +591,7 @@ private:
 };
 
 //#define	LL(x) x=LittleLong(x)
+// FIXME so stupid Dynamix
 #define	LL(x) x=x
 
 #endif /* !__MODEL_LOCAL_H__ */
