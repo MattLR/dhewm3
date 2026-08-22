@@ -561,6 +561,7 @@ void idSampleDecoderLocal::ClearDecoder( void ) {
 		}
 		case WAVE_FORMAT_TAG_MP3: {
 			drmp3_uninit(mp3);
+			decoderMemoryAllocator.Free((byte*)mp3);
 			mp3 = NULL;
 			break;
 		}
