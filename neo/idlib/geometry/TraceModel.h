@@ -74,7 +74,7 @@ typedef enum {
 #define MAX_TRACEMODEL_VERTS		512
 #define MAX_TRACEMODEL_EDGES		512
 #define MAX_TRACEMODEL_POLYS		256
-#define MAX_TRACEMODEL_POLYEDGES	256
+#define MAX_TRACEMODEL_POLYEDGES	32 // Probably enough
 
 typedef idVec3 traceModelVert_t;
 
