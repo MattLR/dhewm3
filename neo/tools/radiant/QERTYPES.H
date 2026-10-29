@@ -166,6 +166,8 @@ typedef struct face_s
 	idPlane					plane;
 	idPlane					originalPlane;
 	bool					dirty;
+	// Q3 texture stuff Dynamix
+	bool needsTexdefConversion;
 
 	idWinding				*face_winding;
 

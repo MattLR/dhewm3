@@ -447,14 +447,25 @@ idMapBrush *idMapBrush::ParseQ3( idLexer &src, const idVec3 &origin ) {
 		// we have an implicit 'textures/' in the old format
 		side->material = "textures/" + token;
 
-		// skip the texture shift, rotate and scale
-		src.ParseInt();
-		src.ParseInt();
-		src.ParseInt();
-		src.ParseFloat();
-		src.ParseFloat();
-		side->texMat[0] = idVec3( 0.03125f, 0.0f, 0.0f );
-		side->texMat[1] = idVec3( 0.0f, 0.03125f, 0.0f );
+		// Read the legacy Q3 texture shift, rotation, and scale. Dynamix
+		int shift0 = src.ParseInt();
+		int shift1 = src.ParseInt();
+		int rotate = src.ParseInt();
+		float scale0 = src.ParseFloat();
+		float scale1 = src.ParseFloat();
+
+		side->SetLegacyTextureDef(
+			(float)shift0,
+			(float)shift1,
+			(float)rotate,
+			scale0,
+			scale1
+		);
+
+		// Keep the existing default matrix. Radiant will generate the
+		// brush-primitive matrix from the preserved legacy values.
+		side->texMat[0] = idVec3(0.03125f, 0.0f, 0.0f);
+		side->texMat[1] = idVec3(0.0f, 0.03125f, 0.0f);
 		side->origin = origin;
 
 		// Q2 allowed override of default flags and values, but we don't any more

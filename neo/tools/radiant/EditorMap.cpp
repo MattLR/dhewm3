@@ -342,8 +342,10 @@ brush_t *BrushFromMapBrush(idMapBrush *mapbrush, idVec3 origin) {
 				f->planepts[j].z = w[j].z + origin.z;
 			}
 
+			// Dynamix Q3 texture stuff
 			idVec3 mat[2];
 			side->GetTextureMatrix(mat[0], mat[1]);
+
 			f->brushprimit_texdef.coords[0][0] = mat[0][0];
 			f->brushprimit_texdef.coords[0][1] = mat[0][1];
 			f->brushprimit_texdef.coords[0][2] = mat[0][2];
@@ -352,6 +354,23 @@ brush_t *BrushFromMapBrush(idMapBrush *mapbrush, idVec3 origin) {
 			f->brushprimit_texdef.coords[1][2] = mat[1][2];
 
 			f->texdef.SetName(side->GetMaterial());
+			f->needsTexdefConversion = false;
+
+			if (side->HasLegacyTextureDef()) {
+				float shift[2];
+				float rotate;
+				float scale[2];
+
+				side->GetLegacyTextureDef(shift, rotate, scale);
+
+				f->texdef.shift[0] = shift[0];
+				f->texdef.shift[1] = shift[1];
+				f->texdef.rotate = rotate;
+				f->texdef.scale[0] = scale[0];
+				f->texdef.scale[1] = scale[1];
+
+				f->needsTexdefConversion = true;
+			}
 		}
 	}
 	return b;
@@ -365,6 +384,7 @@ entity_t *EntityFromMapEntity(idMapEntity *mapent, CWaitDlg *dlg) {
 		ent->origin.Zero();
 		ent->epairs = mapent->epairs;
 		GetVectorForKey(ent, "origin", ent->origin);
+		bool hadOrigin = GetVectorForKey(ent, "origin", ent->origin);
 		int count = mapent->GetNumPrimitives();
 		long lastUpdate = 0;
 		idStr status;
@@ -389,10 +409,17 @@ entity_t *EntityFromMapEntity(idMapEntity *mapent, CWaitDlg *dlg) {
 				if (prim->GetType() == idMapPrimitive::TYPE_BRUSH) {
 					idMapBrush *mapbrush = reinterpret_cast<idMapBrush*>(prim);
 					b = BrushFromMapBrush(mapbrush, ent->origin);
+
+					if (b && !hadOrigin) {
+						for (face_t* f = b->brush_faces; f; f = f->next) {
+							f->dirty = true;
+						}
+					}
 				} else if (prim->GetType() == idMapPrimitive::TYPE_PATCH) {
 					idMapPatch *mappatch = reinterpret_cast<idMapPatch*>(prim);
 					b = BrushFromMapPatch(mappatch, ent->origin);
 				}
+
 				if (b) {
 					b->owner = ent;
 					// add to the end of the entity chain

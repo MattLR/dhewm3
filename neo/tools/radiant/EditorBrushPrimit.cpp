@@ -134,14 +134,18 @@ void FaceToBrushPrimitFace(face_t *f) {
 	// projection on the affine plane use old texture code to compute the ST coords of
 	// these points
 	//
+	// Dynamix, Q3 texture stuff
 	VectorCopy(proj, ST[0]);
-	EmitTextureCoordinates(ST[0], f->d_texture, f);
+	//EmitTextureCoordinates(ST[0], f->d_texture, f);
+	EmitTextureCoordinates(ST[0], f->d_texture, f, true);
 	VectorCopy(texX, ST[1]);
 	VectorAdd(ST[1], proj, ST[1]);
-	EmitTextureCoordinates(ST[1], f->d_texture, f);
+	//EmitTextureCoordinates(ST[1], f->d_texture, f);
+	EmitTextureCoordinates(ST[1], f->d_texture, f, true);
 	VectorCopy(texY, ST[2]);
 	VectorAdd(ST[2], proj, ST[2]);
-	EmitTextureCoordinates(ST[2], f->d_texture, f);
+	//EmitTextureCoordinates(ST[2], f->d_texture, f);
+	EmitTextureCoordinates(ST[2], f->d_texture, f, true);
 
 	// compute texture matrix
 	f->brushprimit_texdef.coords[0][2] = ST[0][3];

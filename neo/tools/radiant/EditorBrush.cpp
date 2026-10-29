@@ -257,6 +257,8 @@ face_t *Face_Alloc(void) {
 	bp.coords[1][1] = 0.0f;
 	f->brushprimit_texdef = bp;
 	f->dirty = true;
+	// Dynamix Q3 texture stuff
+	f->needsTexdefConversion = false;
 	return f;
 }
 
@@ -293,6 +295,8 @@ face_t *Face_Clone(face_t *f) {
 	n->plane = f->plane;
 	n->originalPlane = f->originalPlane;
 	n->dirty = f->dirty;
+	// Q3 texture stuff
+	n->needsTexdefConversion = f->needsTexdefConversion;
 
 	// all other fields are derived, and will be set by Brush_Build
 	return n;
@@ -430,7 +434,7 @@ void Face_TextureVectors(face_t *f, float STfromXYZ[2][4]) {
 	// ++timo when playing with patches, this sometimes get called and the Warning is
 	// displayed find some way out ..
 	//
-	if (g_qeglobals.m_bBrushPrimitMode && !g_qeglobals.bNeedConvert) {
+	if (g_qeglobals.m_bBrushPrimitMode && !g_qeglobals.bNeedConvert && !f->needsTexdefConversion) {
 		common->Printf("Warning : illegal call of Face_TextureVectors in brush primitive mode\n");
 	}
 #endif
@@ -3240,12 +3244,14 @@ void Brush_BuildWindings(brush_t *b, bool bSnap, bool keepOnPlaneWinding, bool u
 
 			// computing ST coordinates for the windings
 			if (g_qeglobals.m_bBrushPrimitMode) {
-				if (g_qeglobals.bNeedConvert) {
+				// Dynamix Q3 texture stuff
+				if (g_qeglobals.bNeedConvert || face->needsTexdefConversion) {
 					//
 					// we have parsed old brushes format and need conversion convert old brush texture
 					// representation to new format
 					//
 					FaceToBrushPrimitFace(face);
+					face->needsTexdefConversion = false;
 	#ifdef _DEBUG
 					// use old texture coordinates code to check against
 					for (i = 0; i < w->GetNumPoints(); i++) {

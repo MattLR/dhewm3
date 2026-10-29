@@ -84,12 +84,45 @@ public:
 	void					SetTextureMatrix( const idVec3 mat[2] ) { texMat[0] = mat[0]; texMat[1] = mat[1]; }
 	void					GetTextureMatrix( idVec3 &mat1, idVec3 &mat2 ) { mat1 = texMat[0]; mat2 = texMat[1]; }
 	void					GetTextureVectors( idVec4 v[2] ) const;
+	// Dynamix Q3 texture stuff
+	void SetLegacyTextureDef(
+		float shift0, float shift1,
+		float rotate, float scale0, float scale1
+	) {
+		hasLegacyTextureDef = true;
+		legacyShift[0] = shift0;
+		legacyShift[1] = shift1;
+		legacyRotate = rotate;
+		legacyScale[0] = scale0;
+		legacyScale[1] = scale1;
+	}
+
+	bool HasLegacyTextureDef() const {
+		return hasLegacyTextureDef;
+	}
+
+	void GetLegacyTextureDef(
+		float shift[2], float& rotate, float scale[2]
+	) const {
+		shift[0] = legacyShift[0];
+		shift[1] = legacyShift[1];
+		rotate = legacyRotate;
+		scale[0] = legacyScale[0];
+		scale[1] = legacyScale[1];
+	}
 
 protected:
 	idStr					material;
 	idPlane					plane;
 	idVec3					texMat[2];
 	idVec3					origin;
+
+	// Q3 texture stuff Dynamix
+	bool hasLegacyTextureDef;
+	float legacyShift[2];
+	float legacyRotate;
+	float legacyScale[2];
+
 };
 
 ID_INLINE idMapBrushSide::idMapBrushSide( void ) {
@@ -97,6 +130,11 @@ ID_INLINE idMapBrushSide::idMapBrushSide( void ) {
 	texMat[0].Zero();
 	texMat[1].Zero();
 	origin.Zero();
+	// Q3 texture stuff
+	hasLegacyTextureDef = false;
+	legacyShift[0] = legacyShift[1] = 0.0f;
+	legacyRotate = 0.0f;
+	legacyScale[0] = legacyScale[1] = 1.0f;
 }
 
 
