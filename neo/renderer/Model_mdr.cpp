@@ -5,6 +5,8 @@
 #include "framework/Session.h"
 #include "renderer/tr_local.h"
 #include "renderer/Model_local.h"
+#include "renderer/Model_sil.h"
+
 #include "renderer/Model_mdr.h"
 
 int		LittleLong(int l) { return l; }
@@ -37,6 +39,7 @@ rvmRenderModelMDR::~rvmRenderModelMDR() {
 	}
 
 	dataSize = 0;
+	rvmSilCache_Free(this);
 }
 
 /*
@@ -61,7 +64,17 @@ void rvmRenderModelMDR::LoadModel( void ) {
 	if ( !purged ) {
 		PurgeModel();
 	}
+
+	frames.Clear();
+
+	if ( modelData ) {
+		Mem_Free(modelData);
+		modelData = nullptr;
+	}
+
 	purged = false;
+
+	rvmSilCache_Free(this);
 
 	materials.Clear();
 
@@ -94,6 +107,157 @@ void rvmRenderModelMDR::LoadModel( void ) {
 
 	// Free the memory from reading in the ifle.
 	fileSystem->FreeFile(mdrMeshBuffer);
+}
+
+/*
+========================
+Dynamix - This function was AI generated
+
+MDR_ConvertToDoomSkeleton
+
+MDR bones are skinning matrices rather than a usable skeleton: every weight
+stores an offset in bone space, and in the EF models all of the bone origins
+sit down at floor level, nowhere near the part of the body they move.
+
+This re-pivots every bone onto the middle of the geometry it deforms, which is
+the skeleton Noesis builds when it converts an MDR to md5mesh/md5anim:
+
+  - bone rotations are unchanged
+  - pivot  p   = mean of the bind position (M0 * offset) over every LOD 0
+				 weight that uses the bone. Bones with no weights (the tag
+				 bones) keep their own origin, so tag attachment is unchanged
+  - frame f origin   t'(f) = t(f) + R(f) * R(0)^T * (p - t(0))
+  - weight offset    o'    = o - R(0)^T * (p - t(0))
+
+The weight change and the origin change cancel exactly, so
+sum(w * (R(f) * o + t(f))) is unchanged and the mesh still skins identically to
+the original MDR on every frame. The converted frames are in the space the
+Doom 3 animator produces, so RenderFramesToModel can be fed idJointMats straight
+from the renderEntity and CalcBones/WriteAnimToDisk write md5anim data that
+matches the Noesis output.
+
+Set MDR_NOESIS_BLENDED_WEIGHTS to 1 to build the weights exactly the way Noesis
+does, from the blended frame 0 vertex position, o' = R(0)^T * (bind - p). That
+is a match for the Noesis md5mesh but drifts from the original MDR skinning
+(up to ~1.6 units on the crew torso in extreme poses).
+========================
+*/
+#define MDR_NOESIS_BLENDED_WEIGHTS	0
+
+static void MDR_ConvertToDoomSkeleton( mdrHeader_t *mdr ) {
+	const int numBones = mdr->numBones;
+	const int numFrames = mdr->numFrames;
+
+	if ( numBones <= 0 || numBones > MDR_MAX_BONES || numFrames <= 0 || mdr->numLODs <= 0 ) {
+		return;
+	}
+
+	const int frameSize = (int)(size_t)(&((mdrFrame_t *)0)->bones[numBones]);
+	mdrFrame_t* firstFrame = (mdrFrame_t*)((byte*)mdr + mdr->ofsFrames);
+
+	// Frame 0 is the bind pose. It gets rewritten below so keep the original.
+	mdrBone_t bind[MDR_MAX_BONES];
+	memcpy(bind, firstFrame->bones, numBones * sizeof(mdrBone_t));
+
+	// Pivot of each bone, the mean per-weight bind position over LOD 0.
+	double	sum[MDR_MAX_BONES][3];
+	int		count[MDR_MAX_BONES];
+	memset(sum, 0, sizeof(sum));
+	memset(count, 0, sizeof(count));
+
+	mdrLOD_t* lod = (mdrLOD_t *)((byte *)mdr + mdr->ofsLODs);
+	mdrSurface_t* surf = (mdrSurface_t *)((byte *)lod + lod->ofsSurfaces);
+	for ( int s = 0; s < lod->numSurfaces; s++) {
+		mdrVertex_t* v = (mdrVertex_t *)((byte *)surf + surf->ofsVerts);
+		for ( int j = 0; j < surf->numVerts; j++ ) {
+			for ( int k = 0; k < v->numWeights; k++ ) {
+				const mdrWeight_t* w = &v->weights[k];
+				if ( w->boneIndex < 0 || w->boneIndex >= numBones ) {
+					continue;
+				}
+				const mdrBone_t& b = bind[w->boneIndex];
+				for ( int r = 0; r < 3; r++ ) {
+					sum[w->boneIndex][r] += b.matrix[r][0] * w->offset[0] + b.matrix[r][1] * w->offset[1] + b.matrix[r][2] * w->offset[2] + b.matrix[r][3];
+				}
+				count[w->boneIndex]++;
+			}
+			v = (mdrVertex_t*)&v->weights[v->numWeights];
+		}
+		surf = (mdrSurface_t*)((byte*)surf + surf->ofsEnd);
+	}
+
+	// pivot[i] is the new bind origin, local[i] = R(0)^T * (pivot - t(0)) is the
+	// same shift expressed in bone space.
+	double pivot[MDR_MAX_BONES][3];
+	double local[MDR_MAX_BONES][3];
+	for ( int i = 0; i < numBones; i++ ) {
+		double d[3];
+		for ( int r = 0; r < 3; r++ ) {
+			pivot[i][r] = count[i] ? sum[i][r] / count[i] : (double)bind[i].matrix[r][3];
+			d[r] = pivot[i][r] - bind[i].matrix[r][3];
+		}
+		for  (int c = 0; c < 3; c++ ) {
+			local[i][c] = bind[i].matrix[0][c] * d[0] + bind[i].matrix[1][c] * d[1] + bind[i].matrix[2][c] * d[2];
+		}
+	}
+
+	// Move the bone origin on every frame, t'(f) = t(f) + R(f) * local
+	for ( int f = 0; f < numFrames; f++ ) {
+		mdrFrame_t *frame = (mdrFrame_t *)((byte *)firstFrame + f * frameSize);
+		for ( int i = 0; i < numBones; i++ ) {
+			float(*m)[4] = frame->bones[i].matrix;
+			for ( int r = 0; r < 3; r++ ) {
+				m[r][3] += (float)(m[r][0] * local[i][0] + m[r][1] * local[i][1] + m[r][2] * local[i][2]);
+			}
+		}
+	}
+
+	// Re-express the weights against the new bone origins, every LOD.
+	lod = (mdrLOD_t*)((byte*)mdr + mdr->ofsLODs);
+	for ( int l = 0; l < mdr->numLODs; l++ ) {
+		surf = (mdrSurface_t *)((byte *)lod + lod->ofsSurfaces);
+		for ( int s = 0; s < lod->numSurfaces; s++ ) {
+			mdrVertex_t *v = (mdrVertex_t *)((byte *)surf + surf->ofsVerts);
+			for ( int j = 0; j < surf->numVerts; j++ ) {
+#if MDR_NOESIS_BLENDED_WEIGHTS
+				double blended[3] = { 0.0, 0.0, 0.0 };
+				for (int k = 0; k < v->numWeights; k++) {
+					const mdrWeight_t* w = &v->weights[k];
+					if (w->boneIndex < 0 || w->boneIndex >= numBones) {
+						continue;
+					}
+					const mdrBone_t& b = bind[w->boneIndex];
+					for (int r = 0; r < 3; r++) {
+						blended[r] += w->boneWeight * (b.matrix[r][0] * w->offset[0] + b.matrix[r][1] * w->offset[1] + b.matrix[r][2] * w->offset[2] + b.matrix[r][3]);
+					}
+				}
+#endif
+				for ( int k = 0; k < v->numWeights; k++ ) {
+					mdrWeight_t* w = &v->weights[k];
+					if ( w->boneIndex < 0 || w->boneIndex >= numBones ) {
+						continue;
+					}
+#if MDR_NOESIS_BLENDED_WEIGHTS
+					const mdrBone_t& b = bind[w->boneIndex];
+					double d[3];
+					for (int r = 0; r < 3; r++) {
+						d[r] = blended[r] - pivot[w->boneIndex][r];
+					}
+					for (int c = 0; c < 3; c++) {
+						w->offset[c] = (float)(b.matrix[0][c] * d[0] + b.matrix[1][c] * d[1] + b.matrix[2][c] * d[2]);
+					}
+#else
+					for ( int c = 0; c < 3; c++ ) {
+						w->offset[c] = (float)(w->offset[c] - local[w->boneIndex][c]);
+					}
+#endif
+				}
+				v = (mdrVertex_t *)&v->weights[v->numWeights];
+			}
+			surf = (mdrSurface_t *)((byte *)surf + surf->ofsEnd);
+		}
+		lod = (mdrLOD_t *)((byte *)lod + lod->ofsEnd);
+	}
 }
 
 /*
@@ -432,14 +596,13 @@ bool rvmRenderModelMDR::LoadMDRFile( void *buffer, int filesize ) {
 	defaultPose.SetGranularity(1);
 	defaultPose.SetNum(header->numBones);
 
-
 	for ( int i = 0; i < header->numBones; i++ ) {
 		if (i == 0) {
 			joints[i].name = "origin";
 			joints[i].parent = NULL;
 		} else {
 			joints[i].name = va("bone%d", i);
-			//common->Printf("Bone name %s\n", joints[i].name.c_str());
+			//common->DPrintf("Bone name %s\n", joints[i].name.c_str());
 			joints[i].parent = &joints[0];
 		}
 	}
@@ -453,11 +616,24 @@ bool rvmRenderModelMDR::LoadMDRFile( void *buffer, int filesize ) {
 	}
 	*/
 
-	//Defaultpose here for now - Dynamix
+	// Move the bones to where Doom 3 wants them and bring the weights with them
+	// so the frames, the weights, CalcBones and the md5anim files all agree.
+	MDR_ConvertToDoomSkeleton(modelData);
 
-	// Default pose  = calcbones 0?
-	// Default pose is transformed idjointquats I think
-	// Just make it a sep
+	// The default pose is frame 0 in md5 form: bone 0 absolute and the other
+	// bones relative to it, the same thing idRenderModelMD5 builds from the
+	// md5mesh joints. Go through idCQuat so w is positive like an md5 file read.
+	{
+		idList<idJointMat> boneData;
+		boneData.SetGranularity(1);
+		boneData.SetNum(header->numBones);
+		CalcBones(boneData, 0);
+
+		for ( int i = 0; i < header->numBones; i++ ) {
+			defaultPose[i] = boneData[i].ToJointQuat();
+			defaultPose[i].q = defaultPose[i].q.ToCQuat().ToQuat();
+		}
+	}
 
 	return true;
 }
@@ -713,25 +889,15 @@ void rvmRenderModelMDR::RenderFramesToModel( idRenderModelStatic *staticModel, c
 	baseIndex = 0;
 	baseVertex = 0;
 	for ( int i = 0; i < lod->numSurfaces; i++ ) {
-		srfTriangles_t* tri = R_AllocStaticTriSurf();
-		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
-		R_AllocStaticTriSurfIndexes(tri, surface->numTriangles * 3);
-		tri->bounds.Clear();
-
-		modelSurface_t	surf;
-
-		surf.id = i;
-		surf.geometry = tri;
+		// md3/md5 style: reuse the surface and tri from the cached snapshot, rewrite verts only
+		modelSurface_t& surf = *rvmAcquireSurface(staticModel, i, surface->numVerts);
+		srfTriangles_t* tri = surf.geometry;
 
 		surf.shader = materials[i];
 
 		// Set up all triangles.
 		triangles = (int *)((byte *)surface + surface->ofsTriangles);
 		indexes = surface->numTriangles * 3;
-		for ( j = 0; j < indexes; j++ ) {
-			tri->indexes[baseIndex + j] = baseVertex + triangles[j];
-		}
-		tri->numIndexes += indexes;
 
 		//
 		// lerp all the needed bones
@@ -789,12 +955,15 @@ void rvmRenderModelMDR::RenderFramesToModel( idRenderModelStatic *staticModel, c
 		//tess.numVertexes += surface->numVerts;
 		tri->numVerts += surface->numVerts;
 
+		// stencil shadows: silhouette info depends only on topology, so it is built
+		// once from the first skinned pose and shared by every frame (see Model_sil.h)
+		rvmSilCache_Apply(this, i, tri, triangles, indexes, baseVertex);
+
 		//baseVertex += surface->numVerts;
 		//baseIndex += surface->numTriangles * 3;
 
 		R_BoundTriSurf(tri);
 
-		staticModel->AddSurface(surf);
 		staticModel->bounds.AddPoint(surf.geometry->bounds[0]);
 		staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
 
@@ -859,17 +1028,26 @@ idRenderModel *rvmRenderModelMDR::InstantiateDynamicModel( const struct renderEn
 	class idRenderEntityLocal *renderEntity = (class idRenderEntityLocal *)ent;
 
 	// Dynamix - bring the md5 stuff over for this
-	if ( cachedModel ) {
+	if ( cachedModel && idStr::Icmp(cachedModel->Name(), MDR_SNAPSHOT_NAME) != 0 ) {
 		delete cachedModel;
 		cachedModel = NULL;
 	}
 
 	if ( purged ) {
 		common->DWarning("model %s instantiated while purged", Name());
+		if ( cachedModel ) {
+			delete cachedModel;
+			cachedModel = NULL;
+		}
 		LoadModel();
 	}
 
-	staticModel = new idRenderModelStatic;
+	if ( cachedModel ) {
+		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
+	} else {
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty(MDR_SNAPSHOT_NAME);
+	}
 	staticModel->bounds.Clear();
 
 	// Dynamix - unused and I don't know if EF does any scaling, look into it
@@ -1262,6 +1440,7 @@ idRenderModelMDX::~idRenderModelMDX() {
 	}
 
 	dataSize = 0;
+	rvmSilCache_Free(this);
 }
 
 /*
@@ -1290,8 +1469,15 @@ void idRenderModelMDX::LoadModel(void) {
 		Mem_Free(animData);
 		animData = nullptr;
 	}
+
+	if (modelData) {
+		Mem_Free(modelData);
+		modelData = nullptr;
+	}
+
 	purged = false;
 
+	rvmSilCache_Free(this);
 	materials.Clear();
 
 	// Try and load the file off disk.
@@ -1975,22 +2161,15 @@ void idRenderModelMDX::RenderFramesToModel(
 		header->numSurfaces * sizeof(mdxmLODSurfOffset_t));
 
 	for (int surfaceNum = 0; surfaceNum < header->numSurfaces; ++surfaceNum) {
-		srfTriangles_t* tri = R_AllocStaticTriSurf();
-		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
-		R_AllocStaticTriSurfIndexes(tri, surface->numTriangles * 3);
-		tri->bounds.Clear();
-
-		modelSurface_t surf;
-		surf.id = surfaceNum;
-		surf.geometry = tri;
+		// md3/md5 style: reuse the surface and tri from the cached snapshot, rewrite verts only
+		modelSurface_t& surf = *rvmAcquireSurface(staticModel, surfaceNum, surface->numVerts);
+		srfTriangles_t* tri = surf.geometry;
 		surf.shader = materials[surfaceNum];
 
+		// indexes and silhouette arrays live in the rvmSilCache and are attached to the tri
+		// by rvmSilCache_Apply() below; the tri must not allocate its own indexes
 		int* triangles = (int*)((byte*)surface + surface->ofsTriangles);
 		const int numIndexes = surface->numTriangles * 3;
-		for (int j = 0; j < numIndexes; ++j) {
-			tri->indexes[j] = triangles[j];
-		}
-		tri->numIndexes = numIndexes;
 
 		int* boneRefs = (int*)((byte*)surface + surface->ofsBoneReferences);
 		mdxmVertex_t* verts = (mdxmVertex_t*)((byte*)surface + surface->ofsVerts);
@@ -2075,9 +2254,13 @@ void idRenderModelMDX::RenderFramesToModel(
 		}
 
 		tri->numVerts = surface->numVerts;
+
+		// stencil shadows: silhouette info depends only on topology, so it is built
+		// once from the first skinned pose and shared by every frame (see Model_sil.h)
+		rvmSilCache_Apply(this, surfaceNum, tri, triangles, numIndexes, 0);
+
 		R_BoundTriSurf(tri);
 		R_DeriveTangents(tri);
-		staticModel->AddSurface(surf);
 		staticModel->bounds.AddPoint(surf.geometry->bounds[0]);
 		staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
 
@@ -2140,7 +2323,9 @@ idRenderModelMDX::InstantiateDynamicModel
 idRenderModel* idRenderModelMDX::InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel) {
 	idRenderModelStatic* staticModel;
 
-	if (cachedModel) {
+	// keep the previous snapshot (md3/md5 style) so its surfaces and tris are reused;
+	// anything that is not one of our snapshots is discarded
+	if ( cachedModel && idStr::Icmp(cachedModel->Name(), GLM_SNAPSHOT_NAME) != 0 ) {
 		delete cachedModel;
 		cachedModel = NULL;
 	}
@@ -2163,7 +2348,13 @@ idRenderModel* idRenderModelMDX::InstantiateDynamicModel(const struct renderEnti
 
 	int scale = 1;
 
-	staticModel = new idRenderModelStatic;
+	if (cachedModel) {
+		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
+	}
+	else {
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty(GLM_SNAPSHOT_NAME);
+	}
 	staticModel->bounds.Clear();
 
 	// Dynamix - clean up the parms and/or just merge this back into here
@@ -2309,6 +2500,11 @@ void idRenderModelMDX::CreateSurfaces() {
 			//tess.numVertexes += surface->numVerts;
 			tri->numVerts += surface->numVerts;
 
+			// stencil shadows: this is a static (non-animated) surface that owns its arrays,
+			// so the normal static-model silhouette build applies, as for md3 with one frame
+			R_CreateSilIndexes(tri);
+			R_IdentifySilEdges(tri, true);
+
 
 			//baseVertex += surface->numVerts;
 			//baseIndex += surface->numTriangles * 3;
@@ -2346,6 +2542,7 @@ void idRenderModelMDX::LoadAnim(void) {
 		return;
 	}
 
+	// Dynamix FIXME, this is nonsense
 	idStr candidates[3];
 	candidates[0] = modelData->animName;
 	candidates[0] += ".gla";

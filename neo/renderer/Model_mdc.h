@@ -41,9 +41,14 @@ Private structures used by the MDc loader.
 #define MDC_IDENT			(('C'<<24)+('P'<<16)+('D'<<8)+'I')
 #define MDC_VERSION			2
 
-// surface geometry should not exceed these limits
+// kept for other loaders that include this header; the MDC loader itself
+// uses the MDC_MAX_* limits below
+#ifndef SHADER_MAX_VERTEXES
 #define	SHADER_MAX_VERTEXES	1000
+#endif
+#ifndef SHADER_MAX_INDEXES
 #define	SHADER_MAX_INDEXES	(6*SHADER_MAX_VERTEXES)
+#endif
 
 // limits
 #define MDC_MAX_LODS		4
@@ -62,11 +67,13 @@ Private structures used by the MDc loader.
 #define MDC_MAX_OFS         127.0   // to be safe
 #define MDC_MAX_DIST        ( MDC_MAX_OFS * MDC_DIST_SCALE )
 
-#define R_MDC_DecodeXyzCompressed( ofsVec, out ) \
-	( out )[0] = ( (float)( ( ofsVec ) & 255 ) - MDC_MAX_OFS ) * MDC_DIST_SCALE; \
-	( out )[1] = ( (float)( ( ofsVec >> 8 ) & 255 ) - MDC_MAX_OFS ) * MDC_DIST_SCALE; \
-	( out )[2] = ( (float)( ( ofsVec >> 16 ) & 255 ) - MDC_MAX_OFS ) * MDC_DIST_SCALE; \
-;
+// low 3 bytes: xyz offset from the last base frame, high byte: normal index
+// (the normal index is unused, the renderer derives normals itself)
+static ID_INLINE void R_MDC_DecodeXyzCompressed( unsigned int ofsVec, idVec3 &out ) {
+	out[0] = ( (float)( ( ofsVec ) & 255 ) - (float)MDC_MAX_OFS ) * (float)MDC_DIST_SCALE;
+	out[1] = ( (float)( ( ofsVec >> 8 ) & 255 ) - (float)MDC_MAX_OFS ) * (float)MDC_DIST_SCALE;
+	out[2] = ( (float)( ( ofsVec >> 16 ) & 255 ) - (float)MDC_MAX_OFS ) * (float)MDC_DIST_SCALE;
+}
 
 typedef struct mdcXyzCompressed_s {
 	unsigned int ofsVec;			// offset direction from the last base frame

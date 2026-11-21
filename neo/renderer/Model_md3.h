@@ -144,4 +144,121 @@ typedef struct md3Header_s {
 	int			ofsEnd;				// end of file
 } md3Header_t;
 
+// Testing Dynamix
+/*
+========================================================================
+
+.TAN triangle model file format (FAKK2 / Alice / MOHAA "Tiki animation")
+
+Private structures used by the TAN loader.  Layout taken from the
+import_bsp/TAN.py importer in SomaZ/Blender_BSP_Importer.  Everything is
+little endian.  Only the static (first frame) data is used by the loader.
+
+Offsets inside a surface are relative to the start of that surface,
+the per-tag offsets in the header are absolute (relative to the file start).
+
+========================================================================
+*/
+
+// file starts with the bytes 'T','A','N',' '
+#define TAN_IDENT			(((' ')<<24)+(('N')<<16)+(('A')<<8)+'T')
+#define TAN_VERSION			2
+
+// sanity limits, the format itself has no real ones
+#define TAN_MAX_VERTS		65536	// per surface
+#define TAN_MAX_TRIANGLES	131072	// per surface
+#define TAN_MAX_TAGS		16		// the header only has room for 16 tag offsets
+#define MAX_TANPATH			64
+
+// vertex positions are 16 bit values scaled per frame:
+//   pos = value * frame.scale + frame.offset
+
+typedef struct tanHeader_s {
+	int			ident;
+	int			version;
+
+	char		name[MAX_TANPATH];	// model name
+
+	int			numFrames;
+	int			numTags;
+	int			numSurfaces;
+
+	float		totalTime;
+	float		totalDelta[3];
+
+	int			ofsFrames;			// numFrames * tanFrame_t
+	int			ofsSurfaces;		// first surface, others follow
+	int			ofsTags[TAN_MAX_TAGS];	// each: tanTagName_t followed by numFrames * tanTagData_t
+	int			ofsEnd;				// end of file
+} tanHeader_t;
+
+typedef struct tanFrame_s {
+	float		bounds[2][3];		// min, max
+	float		scale[3];
+	float		offset[3];
+	float		delta[3];
+	float		radius;
+	float		frameTime;
+} tanFrame_t;
+
+/*
+** tanSurface_t
+**
+** CHUNK			SIZE
+** header			sizeof( tanSurface_t )
+** triangles		sizeof( tanTriangle_t ) * numTriangles
+** collapseMap		sizeof( tanCollapse_t ) * numVerts		(LOD data, unused)
+** st				sizeof( tanSt_t ) * numVerts
+** XyzNormals		sizeof( tanXyzNormal_t ) * numVerts * numFrames
+*/
+typedef struct tanSurface_s {
+	int			ident;
+
+	char		name[MAX_TANPATH];	// polyset name, also used as the material name
+
+	int			numFrames;
+	int			numVerts;
+	int			numModelVerts;		// same as numVerts in exported files
+	int			numTriangles;
+
+	int			ofsTriangles;
+	int			ofsCollapseMap;
+	int			ofsSt;				// texture coords are common for all frames
+	int			ofsXyzNormals;		// numVerts * numFrames
+	int			ofsEnd;				// next surface follows
+} tanSurface_t;
+
+typedef struct {
+	int			indexes[3];			// same winding as MD3
+} tanTriangle_t;
+
+typedef struct {
+	int			id;
+} tanCollapse_t;
+
+typedef struct {
+	float		st[2];				// same orientation as MD3
+} tanSt_t;
+
+typedef struct {
+	unsigned short	xyz[3];
+	unsigned char	normal[2];		// latitude / longitude, same packing as MD3 (unused, normals are derived)
+} tanXyzNormal_t;
+
+typedef struct {
+	char		name[MAX_TANPATH];
+} tanTagName_t;
+
+typedef struct {
+	float		origin[3];
+	float		axis[3][3];
+} tanTagData_t;
+
+// catch struct padding / packing surprises at compile time
+typedef char tanCheckHeaderSize[(sizeof(tanHeader_t) == 176) ? 1 : -1];
+typedef char tanCheckFrameSize[(sizeof(tanFrame_t) == 68) ? 1 : -1];
+typedef char tanCheckSurfaceSize[(sizeof(tanSurface_t) == 104) ? 1 : -1];
+typedef char tanCheckVertSize[(sizeof(tanXyzNormal_t) == 8) ? 1 : -1];
+typedef char tanCheckTagDataSize[(sizeof(tanTagData_t) == 48) ? 1 : -1];
+
 #endif /* !__MODEL_MD3_H__ */

@@ -5,9 +5,26 @@
 #include "framework/Session.h"
 #include "renderer/tr_local.h"
 #include "renderer/Model_local.h"
+#include "renderer/Model_sil.h"
+
 #include "renderer/Model_mds.h"
 
 int		LittleLong2(int l) { return l; }
+
+/*
+========================
+SanitizeJointName
+
+Doom 3 joint names are matched by string, so spaces in MDS bone names are
+replaced with underscores. Used by both the loader and the .md5anim exporter
+so the two always agree.
+========================
+*/
+static idStr SanitizeJointName( const char* boneName ) {
+	idStr s(boneName);
+	s.Replace(" ", "_");
+	return s;
+}
 
 ID_INLINE void LocalAddScaledMatrixTransformVectorTranslate(idVec3 in, float s, idMat3 mat, idVec3 tr, idVec3 out) {
 	out[0] += s * (in[0] * mat[0][0] + in[1] * mat[0][1] + in[2] * mat[0][2] + tr[0]);
@@ -34,19 +51,18 @@ idRenderModelMDS::~idRenderModelMDS
 ========================
 */
 idRenderModelMDS::~idRenderModelMDS() {
-	if(modelData)
-	{
+	if ( modelData ) {
 		Mem_Free(modelData);
 		modelData = nullptr;
 	}
 
-	if (cachedModel)
-	{
+	if ( cachedModel ) {
 		delete cachedModel;
 		cachedModel = nullptr;
 	}
 
 	dataSize = 0;
+	rvmSilCache_Free(this);
 }
 
 /*
@@ -68,23 +84,24 @@ void idRenderModelMDS::LoadModel(void) {
 	void *mdsMeshBuffer;
 	int mdsMeshLen;
 
-	if (!purged) {
+	if ( !purged ) {
 		PurgeModel();
 	}
 	purged = false;
+	rvmSilCache_Free(this);
 
 	materials.Clear();
 
 	// Try and load the file off disk.
 	mdsMeshLen = fileSystem->ReadFile(name, &mdsMeshBuffer);
-	if (mdsMeshLen <= 0 || mdsMeshBuffer == nullptr) {
+	if ( mdsMeshLen <= 0 || mdsMeshBuffer == nullptr ) {
 		common->Warning("Failed to load MDS mesh %s\n", name.c_str());
 		MakeDefaultModel();
 		return;
 	}
 
 	// Parse the MDS file.
-	if (!LoadMDSFile(mdsMeshBuffer, mdsMeshLen)) {
+	if ( !LoadMDSFile(mdsMeshBuffer, mdsMeshLen) ) {
 		MakeDefaultModel();
 		fileSystem->FreeFile(mdsMeshBuffer);
 		return;
@@ -110,7 +127,7 @@ void idRenderModelMDS::LoadModel(void) {
 idRenderModelMDS::LoadMDSFile
 ========================
 */
-bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
+bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 	int					i, j, k;
 	mdsHeader_t			*pinmodel, *mds;
 	mdsFrame_t			*frame;
@@ -136,8 +153,7 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 
 	//pinmodel->version = LittleLong2(pinmodel->version);
 	version = LittleLong2(pinmodel->version);
-	if (version != MDS_VERSION)
-	{
+	if ( version != MDS_VERSION ) {
 		common->Warning("R_LoadMDS: %s has wrong version (%i should be %i)\n", mod_name, pinmodel->version, MDS_VERSION);
 		return false;
 	}
@@ -147,8 +163,7 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 
 	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
 
-	if (size > filesize)
-	{
+	if ( size > filesize ) {
 		common->Warning("R_LoadMDS: Header of %s is broken. Wrong filesize declared!\n", mod_name);
 		return false;
 	}
@@ -182,40 +197,39 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 	
 	// We don't care about the other offset values, we'll generate them ourselves while loading.
 
-	if (mds->numFrames < 1)
-	{
+	if ( mds->numFrames < 1 ) {
 		common->Warning("R_LoadMDS: %s has no frames\n", mod_name);
 		return false;
 	}
 
-	if (LittleLong2(1) != 1) {
+	if ( LittleLong2(1) != 1 ) {
 		// swap all the frames
 		//frameSize = (int)( &((mdsFrame_t *)0)->bones[ mds->numBones ] );
 		frameSize = (int)(sizeof(mdsFrame_t) - sizeof(mdsBoneFrameCompressed_t) + mds->numBones * sizeof(mdsBoneFrameCompressed_t));
-		for (i = 0; i < mds->numFrames; i++, frame++) {
+		for ( i = 0; i < mds->numFrames; i++, frame++ ) {
 			frame = (mdsFrame_t*)((byte*)mds + mds->ofsFrames + i * frameSize);
 			frame->radius = LittleFloat(frame->radius);
-			for (j = 0; j < 3; j++) {
+			for ( j = 0; j < 3; j++ ) {
 				frame->bounds[0][j] = LittleFloat(frame->bounds[0][j]);
 				frame->bounds[1][j] = LittleFloat(frame->bounds[1][j]);
 				frame->localOrigin[j] = LittleFloat(frame->localOrigin[j]);
 				frame->parentOffset[j] = LittleFloat(frame->parentOffset[j]);
 			}
-			for (j = 0; j < mds->numBones * sizeof(mdsBoneFrameCompressed_t) / sizeof(short); j++) {
+			for ( j = 0; j < mds->numBones * sizeof(mdsBoneFrameCompressed_t) / sizeof(short); j++ ) {
 				((short*)frame->bones)[j] = LittleShort(((short*)frame->bones)[j]);
 			}
 		}
 
 		// swap all the tags
-		tag = (mdsTag_t*)((byte*)mds + mds->ofsTags);
-		for (i = 0; i < mds->numTags; i++, tag++) {
+		tag = (mdsTag_t *)((byte *)mds + mds->ofsTags);
+		for ( i = 0; i < mds->numTags; i++, tag++ ) {
 			LL(tag->boneIndex);
 			tag->torsoWeight = LittleFloat(tag->torsoWeight);
 		}
 
 		// swap all the bones
-		for (i = 0; i < mds->numBones; i++, bi++) {
-			bi = (mdsBoneInfo_t*)((byte*)mds + mds->ofsBones + i * sizeof(mdsBoneInfo_t));
+		for ( i = 0; i < mds->numBones; i++, bi++ ) {
+			bi = (mdsBoneInfo_t *)((byte *)mds + mds->ofsBones + i * sizeof(mdsBoneInfo_t));
 			LL(bi->parent);
 			bi->torsoWeight = LittleFloat(bi->torsoWeight);
 			bi->parentDist = LittleFloat(bi->parentDist);
@@ -223,12 +237,10 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 		}
 	}
 
-
-
 	// swap all the surfaces
-	surf = (mdsSurface_t*)((byte*)mds + mds->ofsSurfaces);
-	for (i = 0; i < mds->numSurfaces; i++) {
-		if (LittleLong2(1) != 1) {
+	surf = (mdsSurface_t *)((byte *)mds + mds->ofsSurfaces);
+	for ( i = 0; i < mds->numSurfaces; i++ ) {
+		if ( LittleLong2(1) != 1 ) {
 			LL(surf->ident);
 			LL(surf->shaderIndex);
 			LL(surf->minLod);
@@ -259,23 +271,24 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 		const char* materialName = va("%s%s", bloobloo.c_str(), surf->name);
 		common->Printf("Material name %s\n", materialName);
 
-		if (materialName[0]) {
+		if ( materialName[0] ) {
 			//sh = R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
-			if (sh == nullptr) {
+			if ( sh == nullptr ) {
 				surf->shaderIndex = 0;
 			} else {
 				surf->shaderIndex = sh->Index();
 			}
-		} else { surf->shaderIndex = 0;
+		} else {
+			surf->shaderIndex = 0;
 			common->Warning("Failed to find material %s\n", surf->shader);
 		}
 		materials.Append(sh);
 
-		if (LittleLong2(1) != 1) {
+		if ( LittleLong2(1) != 1 ) {
 			// swap all the triangles
 			tri = (mdsTriangle_t*)((byte*)surf + surf->ofsTriangles);
-			for (j = 0; j < surf->numTriangles; j++, tri++) {
+			for ( j = 0; j < surf->numTriangles; j++, tri++ ) {
 				LL(tri->indexes[0]);
 				LL(tri->indexes[1]);
 				LL(tri->indexes[2]);
@@ -283,7 +296,7 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 
 			// swap all the vertexes
 			v = (mdsVertex_t*)((byte*)surf + surf->ofsVerts);
-			for (j = 0; j < surf->numVerts; j++) {
+			for ( j = 0; j < surf->numVerts; j++ ) {
 				v->normal[0] = LittleFloat(v->normal[0]);
 				v->normal[1] = LittleFloat(v->normal[1]);
 				v->normal[2] = LittleFloat(v->normal[2]);
@@ -293,7 +306,7 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 
 				v->numWeights = LittleLong2(v->numWeights);
 
-				for (k = 0; k < v->numWeights; k++) {
+				for  (k = 0; k < v->numWeights; k++ ) {
 					v->weights[k].boneIndex = LittleLong2(v->weights[k].boneIndex);
 					v->weights[k].boneWeight = LittleFloat(v->weights[k].boneWeight);
 					v->weights[k].offset[0] = LittleFloat(v->weights[k].offset[0]);
@@ -305,14 +318,14 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 			}
 
 			// swap the collapse map
-			collapseMap = (int*)((byte*)surf + surf->ofsCollapseMap);
-			for (j = 0; j < surf->numVerts; j++, collapseMap++) {
+			collapseMap = (int *)((byte *)surf + surf->ofsCollapseMap);
+			for ( j = 0; j < surf->numVerts; j++, collapseMap++ ) {
 				*collapseMap = LittleLong2(*collapseMap);
 			}
 
 			// swap the bone references
-			boneref = (int*)((byte*)surf + surf->ofsBoneReferences);
-			for (j = 0; j < surf->numBoneReferences; j++, boneref++) {
+			boneref = (int *)((byte *)surf + surf->ofsBoneReferences);
+			for ( j = 0; j < surf->numBoneReferences; j++, boneref++ ) {
 				*boneref = LittleLong2(*boneref);
 			}
 		}
@@ -335,27 +348,27 @@ bool idRenderModelMDS::LoadMDSFile(void *buffer, int filesize) {
 	*/
 	
 	// Copy the joints over so Doom 3 can interact with it
-	mdsHeader_t *header = (mdsHeader_t*)modelData;
+	mdsHeader_t *header = (mdsHeader_t *)modelData;
 	joints.SetGranularity(1);
 	joints.SetNum(header->numBones);
 	defaultPose.SetGranularity(1);
 	defaultPose.SetNum(header->numBones);
 
-	mdsBoneInfo_t* boneInfo, * thisBoneInfo, * parentBoneInfo;
-	boneInfo = (mdsBoneInfo_t*)((byte*)header + header->ofsBones);
+	mdsBoneInfo_t *boneInfo, *thisBoneInfo, *parentBoneInfo;
+	boneInfo = (mdsBoneInfo_t *)((byte *)header + header->ofsBones);
 
-	for (int i = 0; i < header->numBones; i++) {
+	for ( int i = 0; i < header->numBones; i++ ) {
 		thisBoneInfo = &boneInfo[i];
-		if (i == 0) {
+		if ( i == 0 ) {
 			joints[i].parent = NULL; 
 			joints[i].name = "origin";
 		} else {
-		joints[i].parent = &joints[thisBoneInfo->parent];
-		joints[i].name = thisBoneInfo->name;
+			joints[i].parent = &joints[thisBoneInfo->parent];
+			joints[i].name = SanitizeJointName(thisBoneInfo->name);
 		}
 	}
 	
-	//Defaultpose here for now - Dynamix
+	//Defaultpose here for now - Dynamix FIXME
 
 	return true;
 }
@@ -393,7 +406,7 @@ idRenderModelMDS::GetJoints
 =================
 */
 const idMD5Joint *idRenderModelMDS::GetJoints(void) const {
-	if (!joints.Num()) {
+	if ( !joints.Num() ) {
 		common->Error("Model has no Joints");
 	}
 	return &joints[0];
@@ -409,8 +422,8 @@ jointHandle_t idRenderModelMDS::GetJointHandle(const char *name) const {
 	int	i;
 
 	joint = joints.Ptr();
-	for (i = 0; i < joints.Num(); i++, joint++) {
-		if (idStr::Icmp(joint->name.c_str(), name) == 0) {
+	for ( i = 0; i < joints.Num(); i++, joint++ ) {
+		if ( idStr::Icmp(joint->name.c_str(), name) == 0 ) {
 			return (jointHandle_t)i;
 		}
 	}
@@ -457,44 +470,29 @@ void idRenderModelMDS::RenderFramesToModel(idRenderModelStatic *staticModel, con
 	
 	header = modelData;
 
-	mdsSurface_t *surface = (mdsSurface_t*)((byte*)header + header->ofsSurfaces);
+	mdsSurface_t *surface = (mdsSurface_t *)((byte *)header + header->ofsSurfaces);
 
 	baseIndex = 0;
 	baseVertex = 0;
 
-	for (int i = 0; i < header->numSurfaces; i++) {
-		srfTriangles_t *tri = R_AllocStaticTriSurf();
-		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
-		R_AllocStaticTriSurfIndexes(tri, surface->numTriangles * 3);
-		tri->bounds.Clear();
-
-		modelSurface_t	surf;
-
-		surf.id = i;
-		surf.geometry = tri;
-
+	for ( int i = 0; i < header->numSurfaces; i++ ) {
+		// md3/md5 style: reuse the surface and tri from the cached snapshot, rewrite verts only
+		modelSurface_t& surf = *rvmAcquireSurface(staticModel, i, surface->numVerts);
+		srfTriangles_t* tri = surf.geometry;
 		surf.shader = materials[i];
 
 		// Set up all triangles.
-		triangles = (int *)((byte *)surface + surface->ofsTriangles);
+		triangles = (int*)((byte*)surface + surface->ofsTriangles);
 		indexes = surface->numTriangles * 3;
-		for (j = 0; j < indexes; j++) {
-			tri->indexes[baseIndex + j] = baseVertex + triangles[j];
-		}
 
-		tri->numIndexes += indexes;
-
-		// Dynamix - investigate shadows, I think normals are fine now
-		//
 		// deform the vertexes by the lerped bones
-		//
-		if (ent) {
+		if ( ent ) {
 			idJointMat bone;
 
 			numVerts = surface->numVerts;
 			v = (mdsVertex_t *)((byte *)surface + surface->ofsVerts);
 
-			for (j = 0; j < numVerts; j++) {
+			for ( j = 0; j < numVerts; j++ ) {
 				idVec3	tempVert, tempNormal;
 				mdsWeight_t	*w;
 
@@ -503,7 +501,7 @@ void idRenderModelMDS::RenderFramesToModel(idRenderModelStatic *staticModel, con
 				
 
 				w = v->weights;
-				for (k = 0; k < v->numWeights; k++, w++) {
+				for ( k = 0; k < v->numWeights; k++, w++ ) {
 					idMat3 rotMatrix;
 
 					bone = ent->joints[w->boneIndex];
@@ -542,6 +540,9 @@ void idRenderModelMDS::RenderFramesToModel(idRenderModelStatic *staticModel, con
 			}
 
 			tri->numVerts += surface->numVerts;
+			// stencil shadows: silhouette info depends only on topology, so it is built
+			// once from the first skinned pose and shared by every frame (see Model_sil.h)
+			rvmSilCache_Apply(this, i, tri, triangles, indexes, baseVertex);
 
 			R_BoundTriSurf(tri);
 
@@ -550,8 +551,6 @@ void idRenderModelMDS::RenderFramesToModel(idRenderModelStatic *staticModel, con
 			//common->Printf("Surf name %s", surface->name);
 			//surf.shader = declManager->FindMaterial("models/players/Bj/bj_body1.tga");
 			//surf.shader = declManager->FindMaterial(surface->name);
-
-			staticModel->AddSurface(surf);
 			
 			staticModel->bounds.AddPoint(surf.geometry->bounds[0]);
 			staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
@@ -577,9 +576,9 @@ void idRenderModelMDS::DrawJoints(const renderEntity_t* ent, const struct viewDe
 	num = ent->numJoints;
 	joint = ent->joints;
 	md5Joint = joints.Ptr();
-	for (i = 0; i < num; i++, joint++, md5Joint++) {
+	for ( i = 0; i < num; i++, joint++, md5Joint++ ) {
 		pos = ent->origin + joint->ToVec3() * ent->axis;
-		if (md5Joint->parent) {
+		if ( md5Joint->parent ) {
 			parentNum = md5Joint->parent - joints.Ptr();
 			session->rw->DebugLine(colorWhite, ent->origin + ent->joints[parentNum].ToVec3() * ent->axis, pos);
 		}
@@ -594,14 +593,14 @@ void idRenderModelMDS::DrawJoints(const renderEntity_t* ent, const struct viewDe
 	bounds.FromTransformedBounds(ent->bounds, vec3_zero, ent->axis);
 	session->rw->DebugBounds(colorMagenta, bounds, ent->origin);
 
-	if ((r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin))) {
+	if ( (r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin)) ) {
 		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
 		float	scale;
 
 		scale = r_jointNameScale.GetFloat();
 		joint = ent->joints;
 		num = ent->numJoints;
-		for (i = 0; i < num; i++, joint++) {
+		for ( i = 0; i < num; i++, joint++ ) {
 			pos = ent->origin + joint->ToVec3() * ent->axis;
 			session->rw->DrawText(joints[i].name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
 		}
@@ -615,36 +614,38 @@ idRenderModelMDS::InstantiateDynamicModel
 */
 idRenderModel *idRenderModelMDS::InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel) {
 	idRenderModelStatic	*staticModel;
-	//class idRenderEntityLocal* renderEntity = (class idRenderEntityLocal*)ent;
-	static const char* MDS_SnapshotName = "_MDS_Snapshot_";
-	// Dynamix - bring the md5 stuff over for this
-	if ( cachedModel ) {
+
+	if (cachedModel && idStr::Icmp(cachedModel->Name(), MDS_SNAPSHOT_NAME) != 0) {
 		delete cachedModel;
 		cachedModel = NULL;
 	}
 
-	if (purged) {
+	if ( purged ) {
 		common->DWarning("model %s instantiated while purged", Name());
+		if ( cachedModel ) {
+			delete cachedModel;
+			cachedModel = NULL;
+		}
 		LoadModel();
 	}
 
-	if (!ent->joints) {
+	if ( !ent->joints ) {
 		common->Printf("idRenderModelMDS::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name());
 		delete cachedModel;
 		return NULL;
-	} else if (ent->numJoints != joints.Num()) {
+	} else if ( ent->numJoints != joints.Num() ) {
 		common->Printf("idRenderModelMDS::InstantiateDynamicModel: renderEntity has different number of joints than model for '%s'\n", Name());
 		delete cachedModel;
 		return NULL;
 	}
 
-	if (cachedModel) {
+	if ( cachedModel ) {
 		assert(dynamic_cast<idRenderModelStatic*>(cachedModel) != NULL);
-		assert(idStr::Icmp(cachedModel->Name(), MDS_SnapshotName) == 0);
+		assert(idStr::Icmp(cachedModel->Name(), MDS_SNAPSHOT_NAME) == 0);
 		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
 	} else {
 		staticModel = new idRenderModelStatic;
-		staticModel->InitEmpty(MDS_SnapshotName);
+		staticModel->InitEmpty(MDS_SNAPSHOT_NAME);
 	}
 
 	staticModel->bounds.Clear();
@@ -657,7 +658,7 @@ idRenderModel *idRenderModelMDS::InstantiateDynamicModel(const struct renderEnti
 	// Dynamix - clean up the parms and/or just merge this back into here
 	// Dynamix ent is never null for some reason even if there's no anim, no idea how that happens, 
 	// Was fine in the MDR version too, very odd
-	if (ent != NULL) {
+	if ( ent != NULL ) {
 		// Dynamix - I was using this to manually animate stuff for testing
 		//RenderFramesToModel(staticModel, NULL, view, material, scale, ent->shaderParms[SHADERPARM_MD3_FRAME]);
 		RenderFramesToModel(staticModel, view, scale, 0, ent);
@@ -665,7 +666,7 @@ idRenderModel *idRenderModelMDS::InstantiateDynamicModel(const struct renderEnti
 		RenderFramesToModel(staticModel, view, scale, 1, NULL);
 	}
 
-	if (r_showSkel.GetInteger()) {
+	if ( r_showSkel.GetInteger() ) {
 		if ((view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID))) {
 			// only draw the skeleton
 			DrawJoints(ent, view);
@@ -681,8 +682,8 @@ idRenderModel *idRenderModelMDS::InstantiateDynamicModel(const struct renderEnti
 idRenderModelMDS::GetJointName
 =================
 */
-const char * idRenderModelMDS::GetJointName(jointHandle_t handle) const {
-	if ((handle < 0) || (handle >= joints.Num())) {
+const char * idRenderModelMDS::GetJointName( jointHandle_t handle ) const {
+	if ( (handle < 0) || (handle >= joints.Num()) ) {
 		return "<invalid joint>";
 	}
 
@@ -694,7 +695,7 @@ const char * idRenderModelMDS::GetJointName(jointHandle_t handle) const {
 idRenderModelMDS::GetDefaultPose
 =================
 */
-const idJointQuat *	idRenderModelMDS::GetDefaultPose(void) const {
+const idJointQuat *	idRenderModelMDS::GetDefaultPose( void ) const {
 	return defaultPose.Ptr();
 }
 /*
@@ -702,7 +703,8 @@ const idJointQuat *	idRenderModelMDS::GetDefaultPose(void) const {
 idRenderModelMDS::NearestJoint
 =================
 */
-int	idRenderModelMDS::NearestJoint(int surfaceNum, int a, int b, int c) const {
+int	idRenderModelMDS::NearestJoint( int surfaceNum, int a, int b, int c ) const {
+	// FIXME
 	return 0;
 }
 
@@ -739,14 +741,14 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 	//return true;
 	//}
 
-	header = (mdsHeader_t*)modelData;
+	header = (mdsHeader_t *)modelData;
 	numBones = header->numBones;
 	numFrames = header->numFrames;
 	frameSize = (int)(sizeof(mdsFrame_t) - sizeof(mdsBoneFrameCompressed_t) + numBones * sizeof(mdsBoneFrameCompressed_t));
 
-	frame = (mdsFrame_t*)((byte*)header + header->ofsFrames + 0 * frameSize);
+	frame = (mdsFrame_t *)((byte *)header + header->ofsFrames + 0 * frameSize);
 
-	boneInfo = (mdsBoneInfo_t*)((byte*)header + header->ofsBones);
+	boneInfo = (mdsBoneInfo_t *)((byte *)header + header->ofsBones);
 
 	idList <idJointMat> boneData;
 	boneData.SetGranularity(1);
@@ -828,7 +830,7 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 
 	// FIXME Add checks for 0/null animations and then just run through once as the super anim
 
-	for (int c = 0; c < numAnims; c++) {
+	for ( int c = 0; c < numAnims; c++ ) {
 		idStr animName;
 		int startFrame = animInfo[c].animInfo[0];
 		int numFrames = animInfo[c].animInfo[1];
@@ -838,7 +840,7 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 		animName.Append(animInfo[c].animName);
 		animName.Append(".md5anim");
 
-		if (findFile_t test = fileSystem->FindFile(animName, 0)) {
+		if ( findFile_t test = fileSystem->FindFile(animName, 0) ) {
 			common->DPrintf("Found file for anim #%d for MDS model, skipping file generation\n", c);
 			continue;
 		}
@@ -846,7 +848,7 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 		common->Printf("Writing %s\n", animName.c_str());
 		fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
 	
-		if (!fp) {
+		if ( !fp ) {
 			common->Warning("WriteAnims: Error opening file %s\n", name.c_str());
 			return false;
 		}
@@ -860,18 +862,18 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 
 		fp->WriteFloatString("hierarchy {\n");
 
-	for (int i = 0; i < numBones; i++) {
+	for ( int i = 0; i < numBones; i++ ) {
 		thisBoneInfo = &boneInfo[i];
-		if (i == 0) {
+		if ( i == 0 ) {
 			fp->WriteFloatString("\t\"origin\" -1 63 0\n");
 		} else {
-			fp->WriteFloatString("\t\"%s\" %d 63 %d\n", thisBoneInfo->name, thisBoneInfo->parent, i * 6);
+			fp->WriteFloatString("\t\"%s\" %d 63 %d\n", SanitizeJointName(thisBoneInfo->name).c_str(), thisBoneInfo->parent, i * 6);
 		}
 	}
 
 	fp->WriteFloatString("}\n\n");
 	fp->WriteFloatString("bounds {\n");
-	for (int i = 0, j = startFrame; i < numFrames; i++, j++) {
+	for ( int i = 0, j = startFrame; i < numFrames; i++, j++ ) {
 		frame = (mdsFrame_t*)((byte*)header + header->ofsFrames + j * frameSize);
 
 		fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n",frame->bounds[0].x, frame->bounds[0].y, frame->bounds[0].z, frame->bounds[1].x, frame->bounds[1].y, frame->bounds[1].z);
@@ -879,24 +881,24 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 	fp->WriteFloatString("}\n\n");
 	CalcBones(boneData, 0);
 	fp->WriteFloatString("baseframe {\n");
-	for (int i = 0; i < numBones; i++) {
+	for ( int i = 0; i < numBones; i++ ) {
 		idJointQuat JointQuat = boneData[i].ToJointQuat();
 		idCQuat cQuat = JointQuat.q.ToCQuat();
 		fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
 	}
 	fp->WriteFloatString("}\n\n");
 
-	for (int i = 0, j = startFrame; i < numFrames; i++, j++) {
+	for ( int i = 0, j = startFrame; i < numFrames; i++, j++ ) {
 		//frame = (mdsFrame_t*)((byte*)header + header->ofsFrames + j * frameSize);
 		CalcBones(boneData, j);
 		fp->WriteFloatString("frame %d {\n", i);
-			for (int k = 0; k < numBones; k++) {
+		for ( int k = 0; k < numBones; k++ ) {
 			idJointQuat JointQuat = boneData[k].ToJointQuat();
 			idCQuat cQuat = JointQuat.q.ToCQuat();
 
 			int newlineCounter = 0;
 			fp->WriteFloatString("%f %f %f %f %f %f\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
-			}
+		}
 		fp->WriteFloatString("}\n\n");
 	}
 	
@@ -910,25 +912,25 @@ bool idRenderModelMDS::WriteAnimToDisk() {
 idRenderModelMDS::CalcBones
 ========================
 */
-void idRenderModelMDS::CalcBones(idList<idJointMat>& boneData, int currentFrame) {
+void idRenderModelMDS::CalcBones( idList<idJointMat>& boneData, int currentFrame ) {
 	int frameSize, numFrames, numBones;
-	mdsHeader_t* header;
-	mdsFrame_t* frame;
-	mdsBoneInfo_t* boneInfo, * thisBoneInfo;
-	mdsBoneFrameCompressed_t* compBone;
+	mdsHeader_t *header;
+	mdsFrame_t *frame;
+	mdsBoneInfo_t *boneInfo, *thisBoneInfo;
+	mdsBoneFrameCompressed_t *compBone;
 	float compNum = (360.0f / 65536.0f);
 
-	header = (mdsHeader_t*)modelData;
+	header = (mdsHeader_t *)modelData;
 	numBones = header->numBones;
 	numFrames = header->numFrames;
 	frameSize = (int)(sizeof(mdsFrame_t) - sizeof(mdsBoneFrameCompressed_t) + numBones * sizeof(mdsBoneFrameCompressed_t));
 
-	frame = (mdsFrame_t*)((byte*)header + header->ofsFrames + currentFrame * frameSize);
+	frame = (mdsFrame_t *)((byte *)header + header->ofsFrames + currentFrame * frameSize);
 
-	boneInfo = (mdsBoneInfo_t*)((byte*)header + header->ofsBones);
+	boneInfo = (mdsBoneInfo_t *)((byte *)header + header->ofsBones);
 
 	//Uncompress the bones into boneData
-	for (int i = 0; i < numBones; i++) {
+	for ( int i = 0; i < numBones; i++ ) {
 		thisBoneInfo = &boneInfo[i];
 		compBone = &frame->bones[i];
 		int parentNum = thisBoneInfo->parent;
@@ -953,7 +955,7 @@ void idRenderModelMDS::CalcBones(idList<idJointMat>& boneData, int currentFrame)
 
 		//common->Printf("Quats %f %f %f:\n", boneRotQuat.x, boneRotQuat.y, boneRotQuat.z);
 
-		if (i == 0) {
+		if ( i == 0 ) {
 			boneData[i].SetRotation(boneRotMat.Transpose());
 			boneData[i].SetTranslation(frame->parentOffset);
 			//common->Printf("Abs transform data:\n");
@@ -961,8 +963,7 @@ void idRenderModelMDS::CalcBones(idList<idJointMat>& boneData, int currentFrame)
 			//idJointQuat JointQuat = boneData[i].ToJointQuat();
 			//idCQuat cQuat = JointQuat.q.ToCQuat();
 			//common->Printf("( %f %f %f ) ( %f %f %f )\n", JointQuat.t.x, JointQuat.t.y, JointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
-		}
-		else {
+		} else {
 			//idMat3 globalMat = boneData[parentNum].ToMat3() * boneRotMat.Transpose();
 			idMat3 globalMat = boneRotMat.Transpose();
 			idVec3 globalPos = boneData[parentNum].ToVec3() + offsetVec; // * boneData[parentNum].ToMat3()
@@ -981,7 +982,7 @@ void idRenderModelMDS::CalcBones(idList<idJointMat>& boneData, int currentFrame)
 	// Only fine if parent is always earlier in the joint layout
 	// It's what Doom 3 does though so who cares
 	// Untransform the joints to .md5anim format
-	for (int i = numBones - 1; i > 0; i--) {
+	for ( int i = numBones - 1; i > 0; i-- ) {
 		thisBoneInfo = &boneInfo[i];
 
 		boneData[i] /= boneData[thisBoneInfo->parent];
@@ -993,17 +994,17 @@ void idRenderModelMDS::CalcBones(idList<idJointMat>& boneData, int currentFrame)
 idRenderModelMDS::ParseAnims
 ========================
 */
-void idRenderModelMDS::ParseAnims(idList <animInfo_t>& animInfo, int &numAnims) {
-	idFile* fp;
+void idRenderModelMDS::ParseAnims( idList <animInfo_t>& animInfo, int &numAnims ) {
+	idFile *fp;
 	idStr animName;
 	idLexer parser(LEXFL_ALLOWPATHNAMES | LEXFL_NOSTRINGESCAPECHARS | LEXFL_NOSTRINGCONCAT);
 	idToken		token;
-	animInfo_t* temp;
+	animInfo_t *temp;
 
 	name.ExtractFilePath(animName);
 	animName.Append("wolfanim.cfg");
 
-	if (findFile_t test = fileSystem->FindFile(animName, 0)) {
+	if ( findFile_t test = fileSystem->FindFile(animName, 0) ) {
 		common->DPrintf("Found anim file %s for MDS model\n", animName.c_str());
 	}
 
@@ -1012,32 +1013,32 @@ void idRenderModelMDS::ParseAnims(idList <animInfo_t>& animInfo, int &numAnims) 
 	parser.SkipUntilString("STARTANIMS");
 	int i = 0;
 	while (1) {
-	parser.ReadToken(&token);
-	animInfo.SetNum(i + 1);
-	animInfo[i].animName = token;
-	if (token == "ENDANIMS") {
-		numAnims = i;
-		return;
-	}
-	//Skipuntilstring skips string and token is the next valid string,  comment lines are skipped entirely
-	animInfo[i].animInfo[0] = parser.ParseInt();
-	animInfo[i].animInfo[1] = parser.ParseInt();
-	animInfo[i].animInfo[2] = parser.ParseInt();
-	animInfo[i].animInfo[3] = parser.ParseInt();
-	animInfo[i].animInfo[4] = parser.ParseInt();
+		parser.ReadToken(&token);
+		animInfo.SetNum(i + 1);
+		animInfo[i].animName = token;
+		if ( token == "ENDANIMS" ) {
+			numAnims = i;
+			return;
+		}
+		//Skipuntilstring skips string and token is the next valid string,  comment lines are skipped entirely
+		animInfo[i].animInfo[0] = parser.ParseInt();
+		animInfo[i].animInfo[1] = parser.ParseInt();
+		animInfo[i].animInfo[2] = parser.ParseInt();
+		animInfo[i].animInfo[3] = parser.ParseInt();
+		animInfo[i].animInfo[4] = parser.ParseInt();
 
-	if (parser.PeekTokenType(TT_NUMBER, TT_INTEGER, &token)) {
-		animInfo[i].animInfo[5] = parser.ParseInt();
-	} else {
-		animInfo[i].animInfo[5] = -2;
-	}
+		if ( parser.PeekTokenType(TT_NUMBER, TT_INTEGER, &token) ) {
+			animInfo[i].animInfo[5] = parser.ParseInt();
+		} else {
+			animInfo[i].animInfo[5] = -2;
+		}
 
-	/*
-	common->DPrintf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
-		animInfo[i].animInfo[2], animInfo[i].animInfo[3],
-		animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
-	*/
-	i++;
+		/*
+		common->DPrintf("%s %d %d %d %d %d %d\n", animInfo[i].animName.c_str(), animInfo[i].animInfo[0], animInfo[i].animInfo[1],
+			animInfo[i].animInfo[2], animInfo[i].animInfo[3],
+			animInfo[i].animInfo[4], animInfo[i].animInfo[5]);
+		*/
+		i++;
 	}
 
 	return;
@@ -1064,17 +1065,18 @@ idRenderModelMDM::~idRenderModelMDM
 ========================
 */
 idRenderModelMDM::~idRenderModelMDM() {
-	if (modelData) {
+	if ( modelData ) {
 		Mem_Free(modelData);
 		modelData = nullptr;
 	}
 
-	if (cachedModel) {
+	if ( cachedModel ) {
 		delete cachedModel;
 		cachedModel = nullptr;
 	}
 
 	dataSize = 0;
+	rvmSilCache_Free(this);
 }
 
 /*
@@ -1082,7 +1084,7 @@ idRenderModelMDM::~idRenderModelMDM() {
 idRenderModelMDM::InitFromFile
 ========================
 */
-void idRenderModelMDM::InitFromFile(const char* fileName) {
+void idRenderModelMDM::InitFromFile( const char* fileName ) {
 	name = fileName;
 	LoadModel();
 }
@@ -1092,20 +1094,21 @@ void idRenderModelMDM::InitFromFile(const char* fileName) {
 idRenderModelMDM::LoadModel
 ========================
 */
-void idRenderModelMDM::LoadModel(void) {
+void idRenderModelMDM::LoadModel( void ) {
 	void* mdsMeshBuffer;
 	int mdsMeshLen;
 
-	if (!purged) {
+	if ( !purged ) {
 		PurgeModel();
 	}
 	purged = false;
+	rvmSilCache_Free(this);
 
 	materials.Clear();
 
 	// Try and load the file off disk.
 	mdsMeshLen = fileSystem->ReadFile(name, &mdsMeshBuffer);
-	if (mdsMeshLen <= 0 || mdsMeshBuffer == nullptr)
+	if ( mdsMeshLen <= 0 || mdsMeshBuffer == nullptr )
 	{
 		common->Warning("Failed to load MDM mesh %s\n", name.c_str());
 		MakeDefaultModel();
@@ -1114,7 +1117,7 @@ void idRenderModelMDM::LoadModel(void) {
 
 	// Parse the MDM file.
 
-	if (!LoadMDMFile(mdsMeshBuffer, mdsMeshLen))
+	if ( !LoadMDMFile(mdsMeshBuffer, mdsMeshLen) )
 	{
 		MakeDefaultModel();
 		fileSystem->FreeFile(mdsMeshBuffer);
@@ -1138,18 +1141,18 @@ void idRenderModelMDM::LoadModel(void) {
 idRenderModelMDM::LoadMDMFile
 ========================
 */
-bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
+bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 	int					i, j, k;
-	mdmHeader_t			*pinmodel, * mdm;
-	mdmSurface_t*		surf;
-	mdmTriangle_t*		tri;
-	mdmVertex_t*		v;
-	mdmTag_t*			tag;
+	mdmHeader_t			*pinmodel, *mdm;
+	mdmSurface_t		*surf;
+	mdmTriangle_t		*tri;
+	mdmVertex_t			*v;
+	mdmTag_t			*tag;
 	int					version;
 	int					size;
-	const idMaterial*	sh;
+	const idMaterial	*sh;
 	int					frameSize;
-	int* collapseMap, * boneref;
+	int					*collapseMap, *boneref;
 
 	const char* mod_name = name.c_str();
 	bounds.Clear();
@@ -1158,8 +1161,7 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 	//pinmodel->version = LittleLong2(pinmodel->version);
 	version = LittleLong2(pinmodel->version);
-	if (version != MDM_VERSION)
-	{
+	if ( version != MDM_VERSION ) {
 		common->Warning("R_LoadMDM: %s has wrong version (%i should be %i)\n", mod_name, pinmodel->version, MDM_VERSION);
 		return false;
 	}
@@ -1169,8 +1171,7 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
 
-	if (size > filesize)
-	{
+	if ( size > filesize ) {
 		common->Warning("R_LoadMDM: Header of %s is broken. Wrong filesize declared!\n", mod_name);
 		return false;
 	}
@@ -1196,14 +1197,13 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 	// We don't care about the other offset values, we'll generate them ourselves while loading.
 
-	if (LittleLong2(1) != 1) {
+	if ( LittleLong2(1) != 1 ) {
 
 		// swap all the tags
-		tag = (mdmTag_t*)((byte*)mdm + mdm->ofsTags);
+		tag = (mdmTag_t *)((byte *)mdm + mdm->ofsTags);
 		for (i = 0; i < mdm->numTags; i++) {
 			int ii;
-			for (ii = 0; ii < 3; ii++)
-			{
+			for ( ii = 0; ii < 3; ii++ ) {
 				tag->axis[ii][0] = LittleFloat(tag->axis[ii][0]);
 				tag->axis[ii][1] = LittleFloat(tag->axis[ii][1]);
 				tag->axis[ii][2] = LittleFloat(tag->axis[ii][2]);
@@ -1221,7 +1221,7 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 			// swap the bone references
 			boneref = (int*)((byte*)tag + tag->ofsBoneReferences);
-			for (j = 0; j < tag->numBoneReferences; j++, boneref++) {
+			for ( j = 0; j < tag->numBoneReferences; j++, boneref++ ) {
 				*boneref = LittleLong2(*boneref);
 			}
 
@@ -1232,8 +1232,8 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 	// swap all the surfaces
 	surf = (mdmSurface_t*)((byte*)mdm + mdm->ofsSurfaces);
-	for (i = 0; i < mdm->numSurfaces; i++) {
-		if (LittleLong2(1) != 1) {
+	for ( i = 0; i < mdm->numSurfaces; i++ ) {
+		if ( LittleLong2(1) != 1 ) {
 			LL(surf->ident);
 			LL(surf->shaderIndex);
 			LL(surf->minLod);
@@ -1269,10 +1269,10 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 		bloobloo.StripTrailingOnce("body.mdm");
 		const char* materialName = va("%s%s", bloobloo.c_str(), surf->name);
 		common->Printf("Material name %s\n", materialName);
-		if (materialName[0]) {
+		if ( materialName[0] ) {
 			//sh = R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
 			sh = declManager->FindMaterial(materialName, true); //R_FindShader(surf->shader, LIGHTMAP_NONE, qtrue);
-			if (sh == nullptr) {
+			if ( sh == nullptr ) {
 				surf->shaderIndex = 0;
 			} else {
 				surf->shaderIndex = sh->Index();
@@ -1283,10 +1283,10 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 		}
 		materials.Append(sh);
 
-		if (LittleLong2(1) != 1) {
+		if ( LittleLong2(1) != 1 ) {
 			// swap all the triangles
 			tri = (mdmTriangle_t*)((byte*)surf + surf->ofsTriangles);
-			for (j = 0; j < surf->numTriangles; j++, tri++) {
+			for ( j = 0; j < surf->numTriangles; j++, tri++ ) {
 				LL(tri->indexes[0]);
 				LL(tri->indexes[1]);
 				LL(tri->indexes[2]);
@@ -1294,7 +1294,7 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 			// swap all the vertexes
 			v = (mdmVertex_t*)((byte*)surf + surf->ofsVerts);
-			for (j = 0; j < surf->numVerts; j++) {
+			for ( j = 0; j < surf->numVerts; j++ ) {
 				v->normal[0] = LittleFloat(v->normal[0]);
 				v->normal[1] = LittleFloat(v->normal[1]);
 				v->normal[2] = LittleFloat(v->normal[2]);
@@ -1304,7 +1304,7 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 				v->numWeights = LittleLong2(v->numWeights);
 
-				for (k = 0; k < v->numWeights; k++) {
+				for  (k = 0; k < v->numWeights; k++ ) {
 					v->weights[k].boneIndex = LittleLong2(v->weights[k].boneIndex);
 					v->weights[k].boneWeight = LittleFloat(v->weights[k].boneWeight);
 					v->weights[k].offset[0] = LittleFloat(v->weights[k].offset[0]);
@@ -1317,19 +1317,19 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 
 			// swap the collapse map
 			collapseMap = (int*)((byte*)surf + surf->ofsCollapseMap);
-			for (j = 0; j < surf->numVerts; j++, collapseMap++) {
+			for ( j = 0; j < surf->numVerts; j++, collapseMap++ ) {
 				*collapseMap = LittleLong2(*collapseMap);
 			}
 
 			// swap the bone references
-			boneref = (int*)((byte*)surf + surf->ofsBoneReferences);
-			for (j = 0; j < surf->numBoneReferences; j++, boneref++) {
+			boneref = (int *)((byte *)surf + surf->ofsBoneReferences);
+			for ( j = 0; j < surf->numBoneReferences; j++, boneref++ ) {
 				*boneref = LittleLong2(*boneref);
 			}
 		}
 
 		// find the next surface
-		surf = (mdmSurface_t*)((byte*)surf + surf->ofsEnd);
+		surf = (mdmSurface_t *)((byte *)surf + surf->ofsEnd);
 	}
 
 	joints.SetGranularity(1);
@@ -1337,8 +1337,9 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 	defaultPose.SetGranularity(1);
 	defaultPose.SetNum(53);
 
-	for (int i = 0; i < 53; i++) {
-		if (i == 0) {
+	// FIXME Dynamix
+	for ( int i = 0; i < 53; i++ ) {
+		if ( i == 0 ) {
 			joints[i].name = "origin";
 			joints[i].parent = NULL;
 		} else {
@@ -1347,7 +1348,8 @@ bool idRenderModelMDM::LoadMDMFile(void* buffer, int filesize) {
 		}
 	}
 
-	//Defaultpose here for now - Dynamix
+	// FIXME Dynamix
+	// Defaultpose here for now - Dynamix
 
 	return true;
 }
@@ -1375,7 +1377,7 @@ void idRenderModelMDM::TouchData() {
 idRenderModelMDM::NumJoints
 =================
 */
-int	idRenderModelMDM::NumJoints(void) const {
+int	idRenderModelMDM::NumJoints( void ) const {
 	return joints.Num();
 	//return modelData->numBones;
 }
@@ -1385,8 +1387,8 @@ int	idRenderModelMDM::NumJoints(void) const {
 idRenderModelMDM::GetJoints
 =================
 */
-const idMD5Joint* idRenderModelMDM::GetJoints(void) const {
-	if (!joints.Num()) {
+const idMD5Joint* idRenderModelMDM::GetJoints( void ) const {
+	if ( !joints.Num() ) {
 		common->Error("Model has no Joints");
 	}
 	return &joints[0];
@@ -1397,11 +1399,11 @@ const idMD5Joint* idRenderModelMDM::GetJoints(void) const {
 idRenderModelMDM::SetJoint
 =================
 */
-void idRenderModelMDM::SetJoint(int index, int parentNum, idStr name) {
-	if (!joints.Num()) {
+void idRenderModelMDM::SetJoint( int index, int parentNum, idStr name ) {
+	if ( !joints.Num() ) {
 		common->Error("Model has no Joints");
 	}
-	if (index == 0) {
+	if ( index == 0 ) {
 		joints[index].name = "origin";
 		joints[index].parent = NULL;
 	} else {
@@ -1417,13 +1419,13 @@ void idRenderModelMDM::SetJoint(int index, int parentNum, idStr name) {
 idRenderModelMDM::GetJointHandle
 =================
 */
-jointHandle_t idRenderModelMDM::GetJointHandle(const char* name) const {
-	const idMD5Joint* joint;
+jointHandle_t idRenderModelMDM::GetJointHandle( const char *name ) const {
+	const idMD5Joint *joint;
 	int	i;
 
 	joint = joints.Ptr();
-	for (i = 0; i < joints.Num(); i++, joint++) {
-		if (idStr::Icmp(joint->name.c_str(), name) == 0) {
+	for ( i = 0; i < joints.Num(); i++, joint++ ) {
+		if ( idStr::Icmp(joint->name.c_str(), name ) == 0) {
 			return (jointHandle_t)i;
 		}
 	}
@@ -1436,7 +1438,7 @@ jointHandle_t idRenderModelMDM::GetJointHandle(const char* name) const {
 idRenderModelMDM::Bounds
 =================
 */
-idBounds idRenderModelMDM::Bounds(const class idRenderEntity* ent) const {
+idBounds idRenderModelMDM::Bounds( const class idRenderEntity *ent ) const {
 	return bounds;
 }
 
@@ -1454,52 +1456,40 @@ int	idRenderModelMDM::Memory() const {
 idRenderModelMDM::RenderFramesToModel
 =================
 */
-void idRenderModelMDM::RenderFramesToModel(idRenderModelStatic* staticModel, const struct viewDef_s* view, int scale, int frameNum, const renderEntity_t* ent) {
+void idRenderModelMDM::RenderFramesToModel( idRenderModelStatic *staticModel, const struct viewDef_s *view, int scale, int frameNum, const renderEntity_t *ent ) {
 	int				i, j, k;
 	float			frontlerp, backlerp;
-	int*			triangles;
+	int				*triangles;
 	int				indexes;
 	int				baseIndex, baseVertex;
 	int				numVerts;
-	mdmVertex_t* v;
-	mdmHeader_t* header;
+	mdmVertex_t		*v;
+	mdmHeader_t		*header;
 	header = modelData;
-	mdmSurface_t* surface = (mdmSurface_t*)((byte*)header + header->ofsSurfaces);
+	mdmSurface_t	*surface = (mdmSurface_t *)((byte *)header + header->ofsSurfaces);
 
 	baseIndex = 0;
 	baseVertex = 0;
 
-	for (int i = 0; i < header->numSurfaces; i++) {
-		srfTriangles_t* tri = R_AllocStaticTriSurf();
-		R_AllocStaticTriSurfVerts(tri, surface->numVerts);
-		R_AllocStaticTriSurfIndexes(tri, surface->numTriangles * 3);
-		tri->bounds.Clear();
-
-		modelSurface_t	surf;
-
-		surf.id = i;
-		surf.geometry = tri;
-
+	for ( int i = 0; i < header->numSurfaces; i++ ) {
+		// md3/md5 style: reuse the surface and tri from the cached snapshot, rewrite verts only
+		modelSurface_t &surf = *rvmAcquireSurface(staticModel, i, surface->numVerts);
+		srfTriangles_t *tri = surf.geometry;
 		surf.shader = materials[i];
 
 		// Set up all triangles.
-		triangles = (int*)((byte*)surface + surface->ofsTriangles);
+		triangles = (int *)((byte *)surface + surface->ofsTriangles);
 		indexes = surface->numTriangles * 3;
-		for (j = 0; j < indexes; j++) {
-			tri->indexes[baseIndex + j] = baseVertex + triangles[j];
-		}
-
-		tri->numIndexes += indexes;
 
 		// Dynamix - investigate normals and shadows
 
-		if (ent) {
+		if ( ent ) {
 			idJointMat bone2;
 			//joint = ent2->joints;
 			//common->Printf("Verts %d \n", surface->numVerts);
 			numVerts = surface->numVerts;
 			v = (mdmVertex_t*)((byte*)surface + surface->ofsVerts);
-			for (j = 0; j < numVerts; j++) {
+			for ( j = 0; j < numVerts; j++ ) {
 				idVec3	tempVert, tempNormal;
 				mdmWeight_t* w;
 
@@ -1507,7 +1497,7 @@ void idRenderModelMDM::RenderFramesToModel(idRenderModelStatic* staticModel, con
 				tempNormal.Zero();
 				w = v->weights;
 
-				for (k = 0; k < v->numWeights; k++, w++) {
+				for ( k = 0; k < v->numWeights; k++, w++ ) {
 					idMat3 rotMatrix;
 
 
@@ -1550,12 +1540,15 @@ void idRenderModelMDM::RenderFramesToModel(idRenderModelStatic* staticModel, con
 
 				tri->generateNormals = false;
 
-				v = (mdmVertex_t*)&v->weights[v->numWeights];
+				v = (mdmVertex_t *)&v->weights[v->numWeights];
 
 			}
 
 			//tess.numVertexes += surface->numVerts;
 			tri->numVerts += surface->numVerts;
+			// stencil shadows: silhouette info depends only on topology, so it is built
+			// once from the first skinned pose and shared by every frame (see Model_sil.h)
+			rvmSilCache_Apply(this, i, tri, triangles, indexes, baseVertex);
 
 			//baseVertex += surface->numVerts;
 			//baseIndex += surface->numTriangles * 3;
@@ -1572,12 +1565,10 @@ void idRenderModelMDM::RenderFramesToModel(idRenderModelStatic* staticModel, con
 			// or index that I can override
 			//surf.shader = declManager->FindMaterial(surface->name);
 
-			staticModel->AddSurface(surf);
-
 			staticModel->bounds.AddPoint(surf.geometry->bounds[0]);
 			staticModel->bounds.AddPoint(surf.geometry->bounds[1]);
 
-			surface = (mdmSurface_t*)((byte*)surface + surface->ofsEnd);
+			surface = (mdmSurface_t *)((byte *)surface + surface->ofsEnd);
 		}
 	}
 }
@@ -1587,20 +1578,20 @@ void idRenderModelMDM::RenderFramesToModel(idRenderModelStatic* staticModel, con
 idRenderModelMDM::DrawJoints
 ====================
 */
-void idRenderModelMDM::DrawJoints(const renderEntity_t* ent, const struct viewDef_s* view) const {
+void idRenderModelMDM::DrawJoints( const renderEntity_t *ent, const struct viewDef_s *view ) const {
 	int					i;
 	int					num;
 	idVec3				pos;
-	const idJointMat* joint;
-	const idMD5Joint* md5Joint;
+	const idJointMat	*joint;
+	const idMD5Joint	*md5Joint;
 	int					parentNum;
 
 	num = ent->numJoints;
 	joint = ent->joints;
 	md5Joint = joints.Ptr();
-	for (i = 0; i < num; i++, joint++, md5Joint++) {
+	for ( i = 0; i < num; i++, joint++, md5Joint++ ) {
 		pos = ent->origin + joint->ToVec3() * ent->axis;
-		if (md5Joint->parent) {
+		if ( md5Joint->parent ) {
 			parentNum = md5Joint->parent - joints.Ptr();
 			session->rw->DebugLine(colorWhite, ent->origin + ent->joints[parentNum].ToVec3() * ent->axis, pos);
 		}
@@ -1615,14 +1606,14 @@ void idRenderModelMDM::DrawJoints(const renderEntity_t* ent, const struct viewDe
 	bounds.FromTransformedBounds(ent->bounds, vec3_zero, ent->axis);
 	session->rw->DebugBounds(colorMagenta, bounds, ent->origin);
 
-	if ((r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin))) {
+	if ( (r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin)) ) {
 		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
 		float	scale;
 
 		scale = r_jointNameScale.GetFloat();
 		joint = ent->joints;
 		num = ent->numJoints;
-		for (i = 0; i < num; i++, joint++) {
+		for ( i = 0; i < num; i++, joint++ ) {
 			pos = ent->origin + joint->ToVec3() * ent->axis;
 			session->rw->DrawText(joints[i].name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
 		}
@@ -1634,23 +1625,40 @@ void idRenderModelMDM::DrawJoints(const renderEntity_t* ent, const struct viewDe
 idRenderModelMDM::InstantiateDynamicModel
 =================
 */
-idRenderModel* idRenderModelMDM::InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel) {
-	idRenderModelStatic* staticModel;
-	if (cachedModel) {
+idRenderModel* idRenderModelMDM::InstantiateDynamicModel( const struct renderEntity_s *ent, const struct viewDef_s *view, idRenderModel *cachedModel ) {
+	idRenderModelStatic *staticModel;
+
+	// keep the previous snapshot (md3/md5 style) so its surfaces and tris are reused;
+	// anything that is not one of our snapshots is discarded
+	if ( cachedModel && idStr::Icmp(cachedModel->Name(), MDM_SNAPSHOT_NAME) != 0 ) {
 		delete cachedModel;
 		cachedModel = NULL;
 	}
 
-	if (purged) {
+	if ( purged ) {
 		common->DWarning("model %s instantiated while purged", Name());
+		if (cachedModel) {
+			delete cachedModel;
+			cachedModel = NULL;
+		}
 		LoadModel();
 	}
 
-	if (!ent->joints) {
+	if ( !ent->joints ) {
 		common->Printf("idRenderModelMDM::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name());
 		delete cachedModel;
 		return NULL;
-	} else if (ent->numJoints != joints.Num()) {
+	} else if ( ent->numJoints != joints.Num() ) {
+		common->Printf("idRenderModelMDM::InstantiateDynamicModel: renderEntity has different number of joints than model for '%s'\n", Name());
+		delete cachedModel;
+		return NULL;
+	}
+
+	if ( !ent->joints ) {
+		common->Printf("idRenderModelMDM::InstantiateDynamicModel: NULL joints on renderEntity for '%s'\n", Name());
+		delete cachedModel;
+		return NULL;
+	} else if ( ent->numJoints != joints.Num() ) {
 		common->Printf("idRenderModelMDM::InstantiateDynamicModel: renderEntity has different number of joints than model for '%s'\n", Name());
 		delete cachedModel;
 		return NULL;
@@ -1658,14 +1666,20 @@ idRenderModel* idRenderModelMDM::InstantiateDynamicModel(const struct renderEnti
 
 	int scale = 1;
 
-	staticModel = new idRenderModelStatic;
+	if ( cachedModel ) {
+		staticModel = static_cast<idRenderModelStatic *>(cachedModel);
+	} else {
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty(MDM_SNAPSHOT_NAME);
+	}
+
 	staticModel->bounds.Clear();
 
 	// Dynamix - clean up the parms and/or just merge this back into here
 	// Dynamix ent is never null for some reason even if there's no anim, no idea how that happens, 
 	// Was fine in the MDR version too, very odd
 	
-	if (ent->joints) {
+	if ( ent->joints ) {
 		// Dynamix - I was using this to manually animate stuff for testing
 		//RenderFramesToModel(staticModel, NULL, view, material, scale, ent->shaderParms[SHADERPARM_MD3_FRAME]);
 		RenderFramesToModel(staticModel, view, scale, 0, ent);
@@ -1673,8 +1687,8 @@ idRenderModel* idRenderModelMDM::InstantiateDynamicModel(const struct renderEnti
 		RenderFramesToModel(staticModel, view, scale, 1, NULL);
 	}
 	
-	if (r_showSkel.GetInteger()) {
-		if ((view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID))) {
+	if ( r_showSkel.GetInteger() ) {
+		if ( (view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID)) ) {
 			// only draw the skeleton
 			DrawJoints(ent, view);
 		}
@@ -1689,8 +1703,8 @@ idRenderModel* idRenderModelMDM::InstantiateDynamicModel(const struct renderEnti
 idRenderModelMDM::GetJointName
 =================
 */
-const char* idRenderModelMDM::GetJointName(jointHandle_t handle) const {
-	if ((handle < 0) || (handle >= joints.Num())) {
+const char* idRenderModelMDM::GetJointName( jointHandle_t handle ) const {
+	if ( (handle < 0) || (handle >= joints.Num()) ) {
 		return "<invalid joint>";
 	}
 
@@ -1702,7 +1716,7 @@ const char* idRenderModelMDM::GetJointName(jointHandle_t handle) const {
 idRenderModelMDM::GetDefaultPose
 =================
 */
-const idJointQuat* idRenderModelMDM::GetDefaultPose(void) const {
+const idJointQuat* idRenderModelMDM::GetDefaultPose( void ) const {
 	return defaultPose.Ptr();
 }
 /*
@@ -1710,6 +1724,7 @@ const idJointQuat* idRenderModelMDM::GetDefaultPose(void) const {
 idRenderModelMDM::NearestJoint
 =================
 */
-int	idRenderModelMDM::NearestJoint(int surfaceNum, int a, int b, int c) const {
+int	idRenderModelMDM::NearestJoint( int surfaceNum, int a, int b, int c ) const {
+	// FIXME
 	return 0;
 }

@@ -35,150 +35,123 @@ If you have questions concerning this license or the applicable additional terms
 
 /***********************************************************************
 
-	idMDCMesh
+	idRenderModelMDC
 
 ***********************************************************************/
-
-// DG: added constructor to make sure all members are initialized
-idRenderModelMDC::idRenderModelMDC() : index(-1), dataSize(0), mdc(NULL), numLods(0)
-{}
-
-// DG: added destructor to clean up the newly added silInfos (and MDC which used to leak)
-idRenderModelMDC::~idRenderModelMDC() {
-	srfTriangles_t tri;
-	memset( &tri, 0, sizeof( tri ) );
-
-	for ( int i=0, n=silInfos.Num() ; i < n ; ++i ) {
-		silInfo_t& silInfo = silInfos[i];
-		// Note: Because tri.sil* was allocated by specialized allocators only available
-		//       in tr.trisurf.cpp, they need to be free'd with them as well.
-		//       The easiest way to do this is by putting them into a srfTriangles_t first
-		tri.silIndexes = silInfo.silIndexes;
-		tri.silEdges = silInfo.silEdges;
-
-		R_FreeStaticTriSurfSilIndexes( &tri );
-		R_FreeStaticTriSurfSilEdges( &tri );
-
-		if ( sizeof(mdcTriangle_t::indexes[0]) != sizeof(silInfo.indexes[0]) ) {
-			tri.indexes = silInfo.indexes;
-			R_FreeStaticTriSurfIndexes( &tri );
-		} // else silInfos[i].indexes points directly into the corresponding data in this->MDC
-	}
-	silInfos.Clear();
-
-	Mem_Free(mdc);
-}
 
 #define	LL(x) x=LittleInt(x)
 
 /*
 =================
-idRenderModelMDC::InitFromFile
+R_MDC_RangeOK
+
+Checks that count elements of elemSize bytes starting at ofs fit inside limit.
+64 bit maths so hostile counts can't overflow.
 =================
 */
-void idRenderModelMDC::InitFromFile( const char *fileName ) {
-	int					i, j;
-	mdcHeader_t			*pinmodel;
-	mdcFrame_t			*frame;
-	mdcSurface_t		*surf;
-	mdcShader_t			*shader;
-	mdcTriangle_t		*tri;
-	mdcSt_t				*st;
-	mdcXyzNormal_t		*xyz;
-	mdcXyzCompressed_t* xyzComp;
-	mdcTag_t			*tag;
-	short*				ps;
-	void				*buffer = NULL;
-	int					version;
-	int					size;
-
-
-	name = fileName;
-
-	size = fileSystem->ReadFile( fileName, &buffer, NULL );
-	// DG: without the int cast, an unsigned comparison is made which fails for size = -1
-	if ( size <= (int)sizeof(mdcHeader_t) ) {
-		if (buffer != NULL) {
-			fileSystem->FreeFile( buffer );
-		}
-		// DG: must make it a default model so failure can be detected elsewhere
-		MakeDefaultModel();
-		return;
+static bool R_MDC_RangeOK( int ofs, long long count, int elemSize, int limit ) {
+	if ( count < 0 ) {
+		return false;
 	}
-
-	pinmodel = (mdcHeader_t *)buffer;
-	int ident = LittleInt(pinmodel->ident);
-	version = LittleInt(pinmodel->version);
-
-	if (ident == MDC_IDENT) {
-		if (version != MDC_VERSION) {
-			fileSystem->FreeFile(buffer);
-			common->Warning("InitFromFile: %s has wrong version (%i should be %i)",
-				fileName, version, MDC_VERSION);
-			MakeDefaultModel();
-			return;
-		}
+	if ( count == 0 ) {
+		return true;
 	}
-
-	
-	if (version != MDC_VERSION) {
-		fileSystem->FreeFile( buffer );
-		common->Warning( "InitFromFile: %s has wrong version (%i should be %i)",
-				 fileName, version, MDC_VERSION);
-		MakeDefaultModel();
-		return;
+	if ( ofs < 0 ) {
+		return false;
 	}
+	return ( (long long)ofs + count * (long long)elemSize ) <= (long long)limit;
+}
 
-	size = LittleInt(pinmodel->ofsEnd);
-	dataSize += size;
-	mdc = (mdcHeader_t *)Mem_Alloc( size );
+/*
+=================
+R_MDC_SwapAndValidate
 
-	memcpy (mdc, buffer, LittleInt(pinmodel->ofsEnd) );
+Byte swaps the whole file in place and validates every offset, count and
+index before anything dereferences them.  Nothing in the MD3 loader checks
+any of this, so a truncated or hostile file reads out of bounds there.
+
+Returns false (after printing a warning) if the file can't be used.
+=================
+*/
+static bool R_MDC_SwapAndValidate( mdcHeader_t *mdc, int size, const char *fileName ) {
+	int i, j;
 
 	LL(mdc->ident);
 	LL(mdc->version);
+	LL(mdc->flags);
 	LL(mdc->numFrames);
 	LL(mdc->numTags);
 	LL(mdc->numSurfaces);
+	LL(mdc->numSkins);
 	LL(mdc->ofsFrames);
+	LL(mdc->ofsTagNames);	// was never swapped
 	LL(mdc->ofsTags);
 	LL(mdc->ofsSurfaces);
 	LL(mdc->ofsEnd);
-	LL(mdc->flags);
-	LL(mdc->numSkins);
+	mdc->name[MAX_MDCPATH-1] = 0;
 
-	//Dynamix for testing
-	//common->Printf("Blah blah frames %5i\n", mdc->numFrames);
-	if (mdc->numFrames < 1 ) {
+	if ( mdc->ident != MDC_IDENT ) {
+		common->Warning( "InitFromFile: %s is not an MDC file (bad ident)", fileName );
+		return false;
+	}
+	if ( mdc->version != MDC_VERSION ) {
+		common->Warning( "InitFromFile: %s has wrong version (%i should be %i)", fileName, mdc->version, MDC_VERSION );
+		return false;
+	}
+	if ( mdc->ofsEnd != size ) {
+		common->Warning( "InitFromFile: %s has a bad ofsEnd", fileName );
+		return false;
+	}
+	if ( mdc->numFrames < 1 ) {
 		common->Warning( "InitFromFile: %s has no frames", fileName );
-		fileSystem->FreeFile( buffer );
-		MakeDefaultModel();
-		return;
+		return false;
+	}
+	if ( mdc->numTags < 0 || mdc->numSurfaces < 0 ) {
+		common->Warning( "InitFromFile: %s has negative tag or surface counts", fileName );
+		return false;
+	}
+	if ( !R_MDC_RangeOK( mdc->ofsFrames, mdc->numFrames, sizeof( mdcFrame_t ), size ) ||
+		 !R_MDC_RangeOK( mdc->ofsTagNames, mdc->numTags, sizeof( mdcTagName_t ), size ) ||
+		 !R_MDC_RangeOK( mdc->ofsTags, (long long)mdc->numTags * mdc->numFrames, sizeof( mdcTag_t ), size ) ) {
+		common->Warning( "InitFromFile: %s has frame or tag data outside the file", fileName );
+		return false;
 	}
 
 	// swap all the frames
-	frame = (mdcFrame_t *) ( (byte *)mdc + mdc->ofsFrames );
-	for ( i = 0 ; i < mdc->numFrames ; i++, frame++) {
+	mdcFrame_t *frame = (mdcFrame_t *)( (byte *)mdc + mdc->ofsFrames );
+	for ( i = 0; i < mdc->numFrames; i++, frame++ ) {
 		frame->radius = LittleFloat( frame->radius );
-		for ( j = 0 ; j < 3 ; j++ ) {
+		for ( j = 0; j < 3; j++ ) {
 			frame->bounds[0][j] = LittleFloat( frame->bounds[0][j] );
 			frame->bounds[1][j] = LittleFloat( frame->bounds[1][j] );
 			frame->localOrigin[j] = LittleFloat( frame->localOrigin[j] );
 		}
 	}
 
+	// tag names are plain chars, just make sure they terminate
+	mdcTagName_t *tagName = (mdcTagName_t *)( (byte *)mdc + mdc->ofsTagNames );
+	for ( i = 0; i < mdc->numTags; i++, tagName++ ) {
+		tagName->name[MAX_MDCPATH-1] = 0;
+	}
+
 	// swap all the tags
-	tag = (mdcTag_t *) ( (byte *)mdc + mdc->ofsTags );
-	for ( i = 0 ; i < mdc->numTags * mdc->numFrames ; i++, tag++) {
-		for ( j = 0 ; j < 3 ; j++ ) {
-			tag->xyz[j] = LittleShort(tag->xyz[j]);
-			tag->angles[j] = LittleShort(tag->angles[j]);
+	mdcTag_t *tag = (mdcTag_t *)( (byte *)mdc + mdc->ofsTags );
+	for ( i = 0; i < mdc->numTags * mdc->numFrames; i++, tag++ ) {
+		for ( j = 0; j < 3; j++ ) {
+			tag->xyz[j] = LittleShort( tag->xyz[j] );
+			tag->angles[j] = LittleShort( tag->angles[j] );
 		}
 	}
 
-	// swap all the surfaces
-	surf = (mdcSurface_t *) ( (byte *)mdc + mdc->ofsSurfaces );
-	for ( i = 0 ; i < mdc->numSurfaces ; i++) {
+	// swap and validate all the surfaces
+	int surfOfs = mdc->ofsSurfaces;
+	for ( i = 0; i < mdc->numSurfaces; i++ ) {
+		if ( !R_MDC_RangeOK( surfOfs, 1, sizeof( mdcSurface_t ), size ) ) {
+			common->Warning( "InitFromFile: %s has surface %i outside the file", fileName, i );
+			return false;
+		}
+
+		mdcSurface_t *surf = (mdcSurface_t *)( (byte *)mdc + surfOfs );
 
 		LL(surf->ident);
 		LL(surf->flags);
@@ -195,14 +168,40 @@ void idRenderModelMDC::InitFromFile( const char *fileName ) {
 		LL(surf->ofsFrameBaseFrames);
 		LL(surf->ofsFrameCompFrames);
 		LL(surf->ofsEnd);
+		surf->name[MAX_MDCPATH-1] = 0;
 
-		if ( surf->numVerts > SHADER_MAX_VERTEXES ) {
-			common->Error( "InitFromFile: %s has more than %i verts on a surface (%i)",
-				fileName, SHADER_MAX_VERTEXES, surf->numVerts );
+		if ( surf->ofsEnd < (int)sizeof( mdcSurface_t ) || !R_MDC_RangeOK( surfOfs, surf->ofsEnd, 1, size ) ) {
+			common->Warning( "InitFromFile: %s has a bad ofsEnd in surface %i", fileName, i );
+			return false;
 		}
-		if ( surf->numTriangles*3 > SHADER_MAX_INDEXES ) {
-			common->Error( "InitFromFile: %s has more than %i triangles on a surface (%i)",
-				fileName, SHADER_MAX_INDEXES / 3, surf->numTriangles );
+		if ( surf->numVerts < 0 || surf->numVerts > MDC_MAX_VERTS ) {
+			common->Warning( "InitFromFile: %s has more than %i verts on a surface (%i)", fileName, MDC_MAX_VERTS, surf->numVerts );
+			return false;
+		}
+		if ( surf->numTriangles < 0 || surf->numTriangles > MDC_MAX_TRIANGLES ) {
+			common->Warning( "InitFromFile: %s has more than %i triangles on a surface (%i)", fileName, MDC_MAX_TRIANGLES, surf->numTriangles );
+			return false;
+		}
+		if ( surf->numShaders < 0 || surf->numShaders > MDC_MAX_SHADERS ) {
+			common->Warning( "InitFromFile: %s has a bad shader count on surface %i (%i)", fileName, i, surf->numShaders );
+			return false;
+		}
+		if ( surf->numBaseFrames < 1 || surf->numCompFrames < 0 ) {
+			common->Warning( "InitFromFile: %s has bad base/comp frame counts on surface %i", fileName, i );
+			return false;
+		}
+
+		const int end = surf->ofsEnd;
+		const long long nv = surf->numVerts;
+		if ( !R_MDC_RangeOK( surf->ofsShaders, surf->numShaders, sizeof( mdcShader_t ), end ) ||
+			 !R_MDC_RangeOK( surf->ofsTriangles, surf->numTriangles, sizeof( mdcTriangle_t ), end ) ||
+			 !R_MDC_RangeOK( surf->ofsSt, nv, sizeof( mdcSt_t ), end ) ||
+			 !R_MDC_RangeOK( surf->ofsXyzNormals, nv * surf->numBaseFrames, sizeof( mdcXyzNormal_t ), end ) ||
+			 !R_MDC_RangeOK( surf->ofsXyzCompressed, nv * surf->numCompFrames, sizeof( mdcXyzCompressed_t ), end ) ||
+			 !R_MDC_RangeOK( surf->ofsFrameBaseFrames, mdc->numFrames, sizeof( short ), end ) ||
+			 !R_MDC_RangeOK( surf->ofsFrameCompFrames, mdc->numFrames, sizeof( short ), end ) ) {
+			common->Warning( "InitFromFile: %s has surface %i data outside the surface", fileName, i );
+			return false;
 		}
 
 		// change to surface identifier
@@ -210,71 +209,215 @@ void idRenderModelMDC::InitFromFile( const char *fileName ) {
 
 		// lowercase the surface name so skin compares are faster
 		int slen = (int)strlen( surf->name );
-		for( j = 0; j < slen; j++ ) {
-			surf->name[j] = tolower( surf->name[j] );
+		for ( j = 0; j < slen; j++ ) {
+			surf->name[j] = tolower( (unsigned char)surf->name[j] );
 		}
 
 		// strip off a trailing _1 or _2
 		// this is a crutch for q3data being a mess
-		j = strlen( surf->name );
+		j = (int)strlen( surf->name );
 		if ( j > 2 && surf->name[j-2] == '_' ) {
 			surf->name[j-2] = 0;
 		}
 
-		// register the shaders
-		shader = (mdcShader_t *) ( (byte *)surf + surf->ofsShaders );
-		for ( j = 0 ; j < surf->numShaders ; j++, shader++ ) {
-			const idMaterial *sh = declManager->FindMaterial( shader->name );
-			// DG: MDCShader_t must use an index to the material instead of a pointer,
-			//     otherwise the sizes are wrong on 64bit and we get data corruption
-			shader->shaderIndex = (sh != NULL) ? shaders.AddUnique( sh ) : -1;
+		// shader names must terminate (shaderIndex is filled in by the caller)
+		mdcShader_t *shader = (mdcShader_t *)( (byte *)surf + surf->ofsShaders );
+		for ( j = 0; j < surf->numShaders; j++, shader++ ) {
+			shader->name[MAX_MDCPATH-1] = 0;
 		}
 
-		// swap all the triangles
-		tri = (mdcTriangle_t *) ( (byte *)surf + surf->ofsTriangles );
-		for ( j = 0 ; j < surf->numTriangles ; j++, tri++ ) {
+		// swap and range check the triangles
+		mdcTriangle_t *tri = (mdcTriangle_t *)( (byte *)surf + surf->ofsTriangles );
+		for ( j = 0; j < surf->numTriangles; j++, tri++ ) {
 			LL(tri->indexes[0]);
 			LL(tri->indexes[1]);
 			LL(tri->indexes[2]);
+			for ( int k = 0; k < 3; k++ ) {
+				if ( tri->indexes[k] < 0 || tri->indexes[k] >= surf->numVerts ) {
+					common->Warning( "InitFromFile: %s has an out of range vertex index in surface %i", fileName, i );
+					return false;
+				}
+			}
 		}
 
 		// swap all the ST
-		st = (mdcSt_t *) ( (byte *)surf + surf->ofsSt );
-		for ( j = 0 ; j < surf->numVerts ; j++, st++ ) {
+		mdcSt_t *st = (mdcSt_t *)( (byte *)surf + surf->ofsSt );
+		for ( j = 0; j < surf->numVerts; j++, st++ ) {
 			st->st[0] = LittleFloat( st->st[0] );
 			st->st[1] = LittleFloat( st->st[1] );
 		}
 
-		// swap all the XyzNormals
-		xyz = (mdcXyzNormal_t *) ( (byte *)surf + surf->ofsXyzNormals );
-		for ( j = 0 ; j < surf->numVerts * surf->numBaseFrames ; j++, xyz++ )
-		{
+		// swap all the base frame XyzNormals
+		mdcXyzNormal_t *xyz = (mdcXyzNormal_t *)( (byte *)surf + surf->ofsXyzNormals );
+		for ( j = 0; j < surf->numVerts * surf->numBaseFrames; j++, xyz++ ) {
 			xyz->xyz[0] = LittleShort( xyz->xyz[0] );
 			xyz->xyz[1] = LittleShort( xyz->xyz[1] );
 			xyz->xyz[2] = LittleShort( xyz->xyz[2] );
-
 			xyz->normal = LittleShort( xyz->normal );
 		}
 
 		// swap all the XyzCompressed
-		xyzComp = (mdcXyzCompressed_t*)((byte*)surf + surf->ofsXyzCompressed);
-		for (j = 0; j < surf->numVerts * surf->numCompFrames; j++, xyzComp++)
-		{
+		mdcXyzCompressed_t *xyzComp = (mdcXyzCompressed_t *)( (byte *)surf + surf->ofsXyzCompressed );
+		for ( j = 0; j < surf->numVerts * surf->numCompFrames; j++, xyzComp++ ) {
 			LL(xyzComp->ofsVec);
 		}
 
-		// swap the frameBaseFrames
-		ps = (short*)((byte*)surf + surf->ofsFrameBaseFrames);
-		for (j = 0; j < mdc->numFrames; j++, ps++)
-		{
-			*ps = LittleShort(*ps);
+		// swap and range check the per-frame base frame / comp frame indexes
+		short *ps = (short *)( (byte *)surf + surf->ofsFrameBaseFrames );
+		for ( j = 0; j < mdc->numFrames; j++, ps++ ) {
+			*ps = LittleShort( *ps );
+			if ( *ps < 0 || *ps >= surf->numBaseFrames ) {
+				common->Warning( "InitFromFile: %s has a bad base frame index in surface %i", fileName, i );
+				return false;
+			}
+		}
+		ps = (short *)( (byte *)surf + surf->ofsFrameCompFrames );
+		for ( j = 0; j < mdc->numFrames; j++, ps++ ) {
+			*ps = LittleShort( *ps );
+			if ( *ps >= surf->numCompFrames ) {	// -1 means "this frame is a base frame"
+				common->Warning( "InitFromFile: %s has a bad comp frame index in surface %i", fileName, i );
+				return false;
+			}
 		}
 
-		// swap the frameCompFrames
-		ps = (short*)((byte*)surf + surf->ofsFrameCompFrames);
-		for (j = 0; j < mdc->numFrames; j++, ps++)
-		{
-			*ps = LittleShort(*ps);
+		surfOfs += surf->ofsEnd;
+	}
+
+	return true;
+}
+
+/*
+=================
+R_MDC_TagQuat
+
+Decodes the compressed tag angles (pitch, yaw, roll) into a quaternion
+=================
+*/
+static idQuat R_MDC_TagQuat( const mdcTag_t *tag ) {
+	return idAngles(
+		tag->angles[0] * (float)MDC_TAG_ANGLE_SCALE,
+		tag->angles[1] * (float)MDC_TAG_ANGLE_SCALE,
+		tag->angles[2] * (float)MDC_TAG_ANGLE_SCALE ).ToQuat();
+}
+
+// DG: added constructor to make sure all members are initialized
+idRenderModelMDC::idRenderModelMDC() : index(-1), dataSize(0), mdc(NULL), numLods(0)
+{}
+
+// DG: added destructor to clean up the newly added silInfos (and MDC which used to leak)
+idRenderModelMDC::~idRenderModelMDC() {
+	FreeData();
+}
+
+/*
+=================
+idRenderModelMDC::FreeData
+
+Releases everything InitFromFile() allocated.  Called from the destructor and
+at the start of InitFromFile(), so reloading a model after a purge doesn't
+leak the old file data, append a second copy of the silInfos or double count
+dataSize.
+=================
+*/
+void idRenderModelMDC::FreeData() {
+	srfTriangles_t tri;
+	memset( &tri, 0, sizeof( tri ) );
+
+	for ( int i = 0, n = silInfos.Num(); i < n; ++i ) {
+		silInfo_t& silInfo = silInfos[i];
+		// Note: Because tri.sil* was allocated by specialized allocators only available
+		//       in tr.trisurf.cpp, they need to be free'd with them as well.
+		//       The easiest way to do this is by putting them into a srfTriangles_t first
+		tri.silIndexes = silInfo.silIndexes;
+		tri.silEdges = silInfo.silEdges;
+
+		R_FreeStaticTriSurfSilIndexes( &tri );
+		R_FreeStaticTriSurfSilEdges( &tri );
+
+		if ( sizeof(mdcTriangle_t::indexes[0]) != sizeof(silInfo.indexes[0]) ) {
+			tri.indexes = silInfo.indexes;
+			R_FreeStaticTriSurfIndexes( &tri );
+		} // else silInfos[i].indexes points directly into the corresponding data in this->mdc
+	}
+	silInfos.Clear();
+	shaders.Clear();
+	defaultPose.Clear();
+
+	if ( mdc != NULL ) {
+		Mem_Free( mdc );
+		mdc = NULL;
+	}
+	dataSize = 0;
+}
+
+/*
+=================
+idRenderModelMDC::InitFromFile
+=================
+*/
+void idRenderModelMDC::InitFromFile( const char *fileName ) {
+	int					i, j;
+	mdcSurface_t		*surf;
+	mdcShader_t			*shader;
+	void				*buffer = NULL;
+	int					size;
+	int					ofsEnd;
+
+	// make reloading safe
+	FreeData();
+
+	name = fileName;
+
+	size = fileSystem->ReadFile( fileName, &buffer, NULL );
+	// DG: without the int cast, an unsigned comparison is made which fails for size = -1
+	if ( size <= (int)sizeof(mdcHeader_t) ) {
+		if ( buffer != NULL ) {
+			fileSystem->FreeFile( buffer );
+		}
+		// DG: must make it a default model so failure can be detected elsewhere
+		MakeDefaultModel();
+		return;
+	}
+
+	// the header is validated properly in R_MDC_SwapAndValidate(), this only has
+	// to be good enough to size the copy without reading past the end of the file
+	ofsEnd = LittleInt( ((mdcHeader_t *)buffer)->ofsEnd );
+	if ( ofsEnd < (int)sizeof(mdcHeader_t) || ofsEnd > size ) {
+		common->Warning( "InitFromFile: %s has a bad ofsEnd (%i, file is %i bytes)", fileName, ofsEnd, size );
+		fileSystem->FreeFile( buffer );
+		MakeDefaultModel();
+		return;
+	}
+
+	mdc = (mdcHeader_t *)Mem_Alloc( ofsEnd );
+	memcpy( mdc, buffer, ofsEnd );
+	fileSystem->FreeFile( buffer );
+	dataSize = ofsEnd;
+
+	if ( !R_MDC_SwapAndValidate( mdc, ofsEnd, fileName ) ) {
+		// don't keep a half swapped file around, the model is a default model now
+		FreeData();
+		MakeDefaultModel();
+		return;
+	}
+
+	// register the shaders and build the shadow info for every surface
+	surf = (mdcSurface_t *)( (byte *)mdc + mdc->ofsSurfaces );
+	for ( i = 0; i < mdc->numSurfaces; i++ ) {
+
+		shader = (mdcShader_t *)( (byte *)surf + surf->ofsShaders );
+		for ( j = 0; j < surf->numShaders; j++, shader++ ) {
+
+			// Dynamix - hack for Raven shaders: the first character of the path
+			// can be garbage, the real paths all start with "models/"
+			if ( memcmp( shader->name + 1, "odel", 4 ) == 0 ) {
+				shader->name[0] = 'm';
+			}
+
+			const idMaterial *sh = declManager->FindMaterial( shader->name );
+			// DG: mdcShader_t must use an index to the material instead of a pointer,
+			//     otherwise the sizes are wrong on 64bit and we get data corruption
+			shader->shaderIndex = ( sh != NULL ) ? shaders.AddUnique( sh ) : -1;
 		}
 
 		silInfos.Append( BuildSilInfo( surf ) );
@@ -283,11 +426,20 @@ void idRenderModelMDC::InitFromFile( const char *fileName ) {
 		surf = (mdcSurface_t *)( (byte *)surf + surf->ofsEnd );
 	}
 
-	// Default pose stuff for tags later Dynamix
-	defaultPose.SetGranularity(1);
-	defaultPose.SetNum(mdc->numTags);
+	// initial tag pose, so GetDefaultPose() is never uninitialised garbage
+	defaultPose.SetGranularity( 1 );
+	defaultPose.SetNum( mdc->numTags );
+	UpdateTagPose( 0, 0, 0.0f );
 
-	fileSystem->FreeFile( buffer );
+	// If this is only one frame generate the static model information to fix
+	// loading issues and allow physics generation (same as the MD3 loader)
+	if ( mdc->numFrames == 1 ) {
+		CreateSurfaces();
+	}
+
+	// idRenderModelStatic::InitFromFile() does this, without it IsLoaded()
+	// stays false after the first purge and the model gets reloaded on every lookup
+	purged = false;
 }
 
 /*
@@ -296,6 +448,10 @@ idRenderModelMDC::IsDynamicModel
 =================
 */
 dynamicModel_t idRenderModelMDC::IsDynamicModel() const {
+	// mdc is NULL if loading failed and this is a default model now
+	if ( mdc == NULL || mdc->numFrames == 1 ) {
+		return DM_STATIC;
+	}
 	return DM_CACHED;
 }
 
@@ -309,247 +465,320 @@ const idJointQuat* idRenderModelMDC::GetDefaultPose(void) const {
 }
 
 /*
+====================
+idRenderModelMDC::UpdateTagPose
+
+Stores the tag positions as joint quats so the game side can read them
+====================
+*/
+void idRenderModelMDC::UpdateTagPose( int frame, int oldframe, float backlerp ) {
+	if ( mdc == NULL || mdc->numTags <= 0 ) {
+		return;
+	}
+	if ( defaultPose.Num() != mdc->numTags ) {
+		defaultPose.SetNum( mdc->numTags );
+	}
+
+	const mdcTag_t *tags = (const mdcTag_t *)( (const byte *)mdc + mdc->ofsTags );
+	const mdcTag_t *tag = tags + frame * mdc->numTags;
+	const mdcTag_t *oldTag = tags + oldframe * mdc->numTags;
+	const float frontlerp = 1.0f - backlerp;
+	idJointQuat *pose = defaultPose.Ptr();
+
+	for ( int i = 0; i < mdc->numTags; i++, oldTag++, tag++, pose++ ) {
+		idVec3 oldPos, newPos;
+
+		oldPos.x = oldTag->xyz[0] * (float)MDC_XYZ_SCALE;
+		oldPos.y = oldTag->xyz[1] * (float)MDC_XYZ_SCALE;
+		oldPos.z = oldTag->xyz[2] * (float)MDC_XYZ_SCALE;
+
+		newPos.x = tag->xyz[0] * (float)MDC_XYZ_SCALE;
+		newPos.y = tag->xyz[1] * (float)MDC_XYZ_SCALE;
+		newPos.z = tag->xyz[2] * (float)MDC_XYZ_SCALE;
+
+		pose->t.Lerp( oldPos, newPos, frontlerp );
+		pose->q.Slerp( R_MDC_TagQuat( oldTag ), R_MDC_TagQuat( tag ), frontlerp );
+	}
+}
+
+/*
 =================
 idRenderModelMDC::LerpMeshVertexes
+
+Base frames hold full 16 bit positions, compressed frames hold a packed
+byte offset per vertex from the base frame they belong to.
 =================
 */
 void idRenderModelMDC::LerpMeshVertexes ( srfTriangles_t *tri, const struct mdcSurface_s *surf, const float backlerp, const int frame, const int oldframe ) const {
-	short	*oldXyz, *newXyz;
-	float	oldXyzScale, newXyzScale;
-	int		vertNum;
-	int		numVerts;
-	idVec3 outNormal; //Filler, unused I think Dynamix
+	const int numVerts = surf->numVerts;
+	const short *frameBaseFrames = (const short *)( (const byte *)surf + surf->ofsFrameBaseFrames );
+	const short *frameCompFrames = (const short *)( (const byte *)surf + surf->ofsFrameCompFrames );
+	const short *xyzBase = (const short *)( (const byte *)surf + surf->ofsXyzNormals );
+	const mdcXyzCompressed_t *compBase = (const mdcXyzCompressed_t *)( (const byte *)surf + surf->ofsXyzCompressed );
+	const bool hasComp = ( surf->numCompFrames > 0 );
 
-	int oldBase, newBase;
-	short* oldComp = NULL, * newComp = NULL; // TTimo: init
-	mdcXyzCompressed_t* oldXyzComp = NULL, * newXyzComp = NULL; // TTimo: init
-	idVec3 oldOfsVec, newOfsVec;
-
-	newBase = (int)*((short*)((byte*)surf + surf->ofsFrameBaseFrames) + frame);
-	//newXyz = (short *)((byte *)surf + surf->ofsXyzNormals) + (frame * surf->numVerts * 4);
-	newXyz = (short *)((byte *)surf + surf->ofsXyzNormals) + (newBase * surf->numVerts * 4);
-	newXyzScale = MDC_XYZ_SCALE * (1.0 - backlerp);
-
-	numVerts = surf->numVerts;
-
-	bool hasComp;
-	hasComp = (surf->numCompFrames > 0);
-	if (hasComp) {
-		newComp = ((short*)((byte*)surf + surf->ofsFrameCompFrames) + frame);
-		if (*newComp >= 0) {
-			newXyzComp = (mdcXyzCompressed_t*)((byte*)surf + surf->ofsXyzCompressed)
-				+ (*newComp * surf->numVerts);
-		}
+	const short *newXyz = xyzBase + frameBaseFrames[frame] * numVerts * 4;
+	const mdcXyzCompressed_t *newComp = NULL;
+	if ( hasComp && frameCompFrames[frame] >= 0 ) {
+		newComp = compBase + frameCompFrames[frame] * numVerts;
 	}
 
-	newXyzScale = MDC_XYZ_SCALE * (1.0 - backlerp);
-	//newNormalScale = 1.0 - backlerp; - Normals unused for now? Dynamix
+	idDrawVert *out = tri->verts + tri->numVerts;
+	idVec3 ofs;
 
 	if ( backlerp == 0 ) {
 		//
 		// just copy the vertexes
 		//
-		for (vertNum=0 ; vertNum < numVerts ; vertNum++, newXyz += 4 ) {
+		const float scale = (float)MDC_XYZ_SCALE;
 
-			idDrawVert *outvert = &tri->verts[tri->numVerts];
-
-			outvert->xyz.x = newXyz[0] * newXyzScale;
-			outvert->xyz.y = newXyz[1] * newXyzScale;
-			outvert->xyz.z = newXyz[2] * newXyzScale;
+		for ( int v = 0; v < numVerts; v++, newXyz += 4, out++ ) {
+			out->xyz.x = newXyz[0] * scale;
+			out->xyz.y = newXyz[1] * scale;
+			out->xyz.z = newXyz[2] * scale;
 
 			// add the compressed ofsVec
-			if (hasComp && *newComp >= 0) {
-				R_MDC_DecodeXyzCompressed(newXyzComp->ofsVec, newOfsVec);
-				newXyzComp++;
-				VectorAdd(outvert->xyz, newOfsVec, outvert->xyz);
+			if ( newComp != NULL ) {
+				R_MDC_DecodeXyzCompressed( newComp[v].ofsVec, ofs );
+				out->xyz += ofs;
 			}
-			tri->numVerts++;
 		}
 	} else {
 		//
-		// interpolate and copy the vertex (and normal?)
+		// interpolate and copy the vertexes
 		//
-		oldBase = (int)*((short*)((byte*)surf + surf->ofsFrameBaseFrames) + oldframe);
-		//oldXyz = (short *)((byte *)surf + surf->ofsXyzNormals) + (oldframe * surf->numVerts * 4);
-		oldXyz = (short*)((byte*)surf + surf->ofsXyzNormals)
-			+ (oldBase * surf->numVerts * 4);
-
-		if (hasComp) {
-			oldComp = ((short*)((byte*)surf + surf->ofsFrameCompFrames) + oldframe);
-			if (*oldComp >= 0) {
-				oldXyzComp = (mdcXyzCompressed_t*)((byte*)surf + surf->ofsXyzCompressed)
-					+ (*oldComp * surf->numVerts);
-			}
+		const short *oldXyz = xyzBase + frameBaseFrames[oldframe] * numVerts * 4;
+		const mdcXyzCompressed_t *oldComp = NULL;
+		if ( hasComp && frameCompFrames[oldframe] >= 0 ) {
+			oldComp = compBase + frameCompFrames[oldframe] * numVerts;
 		}
 
-		oldXyzScale = MDC_XYZ_SCALE * backlerp;
+		const float frontlerp = 1.0f - backlerp;
+		const float newXyzScale = (float)MDC_XYZ_SCALE * frontlerp;
+		const float oldXyzScale = (float)MDC_XYZ_SCALE * backlerp;
 
-		for (vertNum = 0; vertNum < numVerts; vertNum++, oldXyz += 4, newXyz += 4 ) {
-
-			idDrawVert *outvert = &tri->verts[tri->numVerts];
-
+		for ( int v = 0; v < numVerts; v++, oldXyz += 4, newXyz += 4, out++ ) {
 			// interpolate the xyz
-			outvert->xyz.x = oldXyz[0] * oldXyzScale + newXyz[0] * newXyzScale;
-			outvert->xyz.y = oldXyz[1] * oldXyzScale + newXyz[1] * newXyzScale;
-			outvert->xyz.z = oldXyz[2] * oldXyzScale + newXyz[2] * newXyzScale;
+			out->xyz.x = oldXyz[0] * oldXyzScale + newXyz[0] * newXyzScale;
+			out->xyz.y = oldXyz[1] * oldXyzScale + newXyz[1] * newXyzScale;
+			out->xyz.z = oldXyz[2] * oldXyzScale + newXyz[2] * newXyzScale;
 
-			// add the compressed ofsVec
-			if (hasComp && *newComp >= 0) {
-				R_MDC_DecodeXyzCompressed(newXyzComp->ofsVec, newOfsVec, uncompressedNewNormal);
-				newXyzComp++;
-				VectorMA(outvert->xyz, 1.0 - backlerp, newOfsVec, outvert->xyz);
+			// add the compressed ofsVec of both frames, weighted
+			if ( newComp != NULL ) {
+				R_MDC_DecodeXyzCompressed( newComp[v].ofsVec, ofs );
+				out->xyz += ofs * frontlerp;
 			}
-			if (hasComp && *oldComp >= 0) {
-				R_MDC_DecodeXyzCompressed(oldXyzComp->ofsVec, oldOfsVec, uncompressedOldNormal);
-				oldXyzComp++;
-				VectorMA(outvert->xyz, backlerp, oldOfsVec, outvert->xyz);
+			if ( oldComp != NULL ) {
+				R_MDC_DecodeXyzCompressed( oldComp[v].ofsVec, ofs );
+				out->xyz += ofs * backlerp;
 			}
-
-
-			tri->numVerts++;
 		}
+	}
+
+	tri->numVerts += numVerts;
+}
+
+/*
+=================
+idRenderModelMDC::GetSurfaceMaterial
+=================
+*/
+const idMaterial *idRenderModelMDC::GetSurfaceMaterial( const mdcSurface_t *surface ) const {
+	// FIXME: theoretically there can be multiple shaders?
+	if ( surface->numShaders <= 0 ) {
+		return NULL;
+	}
+	const mdcShader_t *shader = (const mdcShader_t *)( (const byte *)surface + surface->ofsShaders );
+	// DG: turned mdcShader_t::shader (pointer) into an int (index)
+	return ( shader->shaderIndex >= 0 ) ? shaders[shader->shaderIndex] : NULL;
+}
+
+/*
+=================
+idRenderModelMDC::FillSurface
+
+Fills an allocated (or reused) surface with the geometry for one frame.
+Shared by CreateSurfaces() and InstantiateDynamicModel().
+tri->verts must already be allocated for surface->numVerts verts.
+=================
+*/
+void idRenderModelMDC::FillSurface( srfTriangles_t *tri, const mdcSurface_t *surface, const silInfo_t &silInfo, float backlerp, int frame, int oldframe ) const {
+	// These flags and references must be (re)set after allocation or reuse.
+	// deformedSurface prevents silEdges, silIndexes, indexes (and more not used here)
+	// from being freed (they belong to silInfo which is freed in FreeData())
+	tri->deformedSurface = true;
+	tri->tangentsCalculated = false;
+	tri->facePlanesCalculated = false;
+	tri->numSilEdges = silInfo.numSilEdges;
+	tri->silEdges = silInfo.silEdges;
+	tri->silIndexes = silInfo.silIndexes;
+	tri->indexes = silInfo.indexes;
+	tri->numIndexes = silInfo.numIndexes;
+	assert( surface->numTriangles * 3 == silInfo.numIndexes );
+
+	// LerpMeshVertexes appends at tri->numVerts, so reset the logical
+	// vertex count while keeping the allocated vertex buffer.
+	tri->numVerts = 0;
+	tri->bounds.Clear();
+
+	LerpMeshVertexes( tri, surface, backlerp, frame, oldframe );
+
+	// Texture coordinates are frame-invariant.  Reassigning them is cheap
+	// and also initialises newly allocated vertex buffers.
+	const float *texCoords = (const float *)( (const byte *)surface + surface->ofsSt );
+	for ( int j = 0; j < surface->numVerts; j++ ) {
+		idDrawVert *stri = &tri->verts[j];
+		stri->st[0] = texCoords[j * 2 + 0];
+		stri->st[1] = texCoords[j * 2 + 1];
+	}
+
+	R_BoundTriSurf( tri );
+}
+
+/*
+=============
+idRenderModelMDC::CreateSurfaces
+
+Single frame models get real static surfaces (needed for physics / collision
+model generation), same as the MD3 loader.
+=============
+*/
+void idRenderModelMDC::CreateSurfaces() {
+	this->bounds.Clear();
+
+	const mdcSurface_t *surface = (const mdcSurface_t *)( (const byte *)mdc + mdc->ofsSurfaces );
+
+	for ( int i = 0; i < mdc->numSurfaces; i++ ) {
+		srfTriangles_t *tri = R_AllocStaticTriSurf();
+		R_AllocStaticTriSurfVerts( tri, surface->numVerts );
+
+		FillSurface( tri, surface, silInfos[i], 0.0f, 0, 0 );
+
+		modelSurface_t surf;
+		surf.geometry = tri;
+		surf.shader = GetSurfaceMaterial( surface );
+		surf.id = this->NumSurfaces(); // DG: make sure to initialize id; FIXME: or just set id to 0?
+		this->AddSurface( surf );
+		this->bounds.AddPoint( tri->bounds[0] );
+		this->bounds.AddPoint( tri->bounds[1] );
+
+		// find the next surface
+		surface = (const mdcSurface_t *)( (const byte *)surface + surface->ofsEnd );
 	}
 }
 
 /*
 =============
 idRenderModelMDC::InstantiateDynamicModel
+
+Same caching scheme as the MD3 loader: the per-entity snapshot (and the
+vertex allocations inside it) is kept between calls and only the animated
+vertex positions are rewritten.  The topology (indexes, sil edges) is shared
+with silInfos and never touched.
 =============
 */
 idRenderModel *idRenderModelMDC::InstantiateDynamicModel( const struct renderEntity_s *ent, const struct viewDef_s *view, idRenderModel *cachedModel ) {
-	int				i, j;
-	float			backlerp;
-	float *			texCoords;
-	int				numVerts;
+	int				i;
+	int				surfaceNum;
 	mdcSurface_t *	surface;
 	int				frame, oldframe;
+	float			backlerp;
 	idRenderModelStatic	*staticModel;
 
-	int numFrames = mdc->numFrames;
+	if ( mdc == NULL ) {
+		// failed to load, we are a default model and shouldn't get here
+		if ( cachedModel ) {
+			delete cachedModel;
+		}
+		return NULL;
+	}
 
-	// TODO: these need set by an entity
-	frame = idMath::ClampInt(0, numFrames-1, ent->shaderParms[SHADERPARM_MD3_FRAME]);	// probably want to keep frames < 1000 or so
-	oldframe = idMath::ClampInt(0, numFrames-1,ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
-	backlerp = ent->shaderParms[SHADERPARM_MD3_BACKLERP];
+	const int numFrames = mdc->numFrames;
 
-	if ( cachedModel ) {
+	frame = idMath::ClampInt( 0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME] );	// probably want to keep frames < 1000 or so
+	oldframe = idMath::ClampInt( 0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_LASTFRAME] );
+	backlerp = idMath::ClampFloat( 0.0f, 1.0f, ent->shaderParms[SHADERPARM_MD3_BACKLERP] );
+
+	if ( cachedModel && !r_useCachedDynamicModels.GetBool() ) {
 		delete cachedModel;
 		cachedModel = NULL;
 	}
 
-	staticModel = new idRenderModelStatic;
-	staticModel->InitEmpty("_MDC_Snapshot_");
+	// Do not accept snapshots generated by another model type
+	if ( cachedModel && idStr::Icmp( cachedModel->Name(), "_MDC_Snapshot_" ) != 0 ) {
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	if ( cachedModel ) {
+		assert( dynamic_cast<idRenderModelStatic *>( cachedModel ) != NULL );
+		staticModel = static_cast<idRenderModelStatic *>( cachedModel );
+	} else {
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty( "_MDC_Snapshot_" );
+	}
+
 	staticModel->bounds.Clear();
 
-	// Dynamix 
-	if (r_showSkel.GetInteger()) {
-		if ((view != NULL) && (!r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || (ent->suppressSurfaceInViewID != view->renderView.viewID))) {
-			// only draw the skeleton
-			DrawTags(ent, view);
+	if ( r_showSkel.GetInteger() ) {
+		if ( ( view != NULL ) && ( !r_skipSuppress.GetBool() || !ent->suppressSurfaceInViewID || ( ent->suppressSurfaceInViewID != view->renderView.viewID ) ) ) {
+			// only draw the tags
+			DrawTags( ent, view );
 		}
 	}
 
 	// Set the tag positions as joint quats so we can get them on the game side
-	//int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
-	mdcTag_t* tag;
-	mdcTag_t* oldTag;
-	idJointQuat* pose;
+	UpdateTagPose( frame, oldframe, backlerp );
 
-	pose = defaultPose.Ptr();
-	tag = (mdcTag_t*)((byte*)mdc + mdc->ofsTags);
-	oldTag = (mdcTag_t*)((byte*)mdc + mdc->ofsTags);
-	oldTag += oldframe  * mdc->numTags;
-	tag += frame * mdc->numTags;
-	float frontlerp = 1.0f - backlerp;
-	for (i = 0; i < mdc->numTags; i++, oldTag++, tag++, pose++) {
-		idVec3 oldPos;
-		idVec3 newPos;
-		idVec3 pos;
-		idQuat oldJ, newJ;
+	surface = (mdcSurface_t *)( (byte *)mdc + mdc->ofsSurfaces );
 
-		oldPos.x = oldTag->xyz[0] * MDC_XYZ_SCALE;
-		oldPos.y = oldTag->xyz[1] * MDC_XYZ_SCALE;
-		oldPos.z = oldTag->xyz[2] * MDC_XYZ_SCALE;
+	for ( i = 0; i < mdc->numSurfaces; i++ ) {
 
-		newPos.x = tag->xyz[0] * MDC_XYZ_SCALE;
-		newPos.y = tag->xyz[1] * MDC_XYZ_SCALE;
-		newPos.z = tag->xyz[2] * MDC_XYZ_SCALE;
-
-		//pos.x = oldPos.x * backlerp + newPos.x * frontlerp;
-		////pos.y = oldPos.y * backlerp + newPos.y * frontlerp;
-		//pos.z = oldPos.z * backlerp + newPos.z * frontlerp;
-
-		pos.Lerp(oldPos, newPos, frontlerp);
-		//common->Printf("Old pos %f %f %f\n New pos %f %f %f\n pos: %f %f %f\n", oldPos.x, oldPos.y, oldPos.z
-		//	, newPos.x, newPos.y, newPos.z, pos.x, pos.y, pos.z);
-
-		pose->t = pos;
-		//pose->t = newPos;
-		oldJ = idAngles(
-			oldTag->angles[0] * (360.0f / 32700.0f),
-			oldTag->angles[1] * (360.0f / 32700.0f),
-			oldTag->angles[2] * (360.0f / 32700.0f)
-			).ToQuat();
-
-		newJ = idAngles(
-			tag->angles[0] * (360.0f / 32700.0f),
-			tag->angles[1] * (360.0f / 32700.0f),
-			tag->angles[2] * (360.0f / 32700.0f)
-		).ToQuat();
-
-		pose->q.Slerp(oldJ, newJ, frontlerp);
-	}
-
-	surface = (mdcSurface_t *) ((byte *)mdc + mdc->ofsSurfaces);
-
-	for( i = 0; i < mdc->numSurfaces; i++ ) {
-
-		srfTriangles_t *tri = R_AllocStaticTriSurf();
-		R_AllocStaticTriSurfVerts( tri, surface->numVerts );
-
-		// DG: set sil edges for shadows
-		silInfo_t& silInfo = silInfos[i];
-		tri->numSilEdges = silInfo.numSilEdges;
-		tri->silEdges = silInfo.silEdges;
-		tri->silIndexes = silInfo.silIndexes;
-
-		tri->indexes = silInfo.indexes;
-		tri->numIndexes = silInfo.numIndexes;
-		assert(surface->numTriangles * 3 == silInfo.numIndexes);
-
-		// deformedSurface prevents silEdges, silIndexes, indexes (and more not used here)
-		// from being freed (they belong to silInfo which is freed in ~idRenderModelMDC())
-		tri->deformedSurface = true;
-
-		tri->bounds.Clear();
-
-		modelSurface_t	surf;
-
-		surf.geometry = tri;
-
-		mdcShader_t* shaders = (mdcShader_t *) ((byte *)surface + surface->ofsShaders);
-		// FIXME: theoretically there can be multiple shaders?
-		// DG: turned MDCShader_t::shader (pointer) into an int (index)
-		int shaderIdx = shaders->shaderIndex;
-		surf.shader = (shaderIdx >= 0) ? this->shaders[shaderIdx] : NULL;
-
-		LerpMeshVertexes( tri, surface, backlerp, frame, oldframe );
-
-		texCoords = (float *) ((byte *)surface + surface->ofsSt);
-
-		numVerts = surface->numVerts;
-		for ( j = 0; j < numVerts; j++ ) {
-			idDrawVert *stri = &tri->verts[j];
-			stri->st[0] = texCoords[j*2+0];
-			stri->st[1] = texCoords[j*2+1];
+		// Surface IDs are stable for the lifetime of this model.  Keep the
+		// modelSurface_t and its vertex allocation in the per-entity snapshot.
+		modelSurface_t *surf;
+		if ( staticModel->FindSurfaceWithId( i, surfaceNum ) ) {
+			surf = &staticModel->surfaces[surfaceNum];
+		} else {
+			modelSurface_t newSurf;
+			memset( &newSurf, 0, sizeof( newSurf ) );
+			newSurf.id = i;
+			staticModel->AddSurface( newSurf );
+			if ( !staticModel->FindSurfaceWithId( i, surfaceNum ) ) {
+				common->Error( "MDC snapshot: failed to find newly-added surface %d", i );
+			}
+			surf = &staticModel->surfaces[surfaceNum];
 		}
 
-		R_BoundTriSurf( tri );
+		// DG: sil edges for shadows
+		const silInfo_t &silInfo = silInfos[i];
 
-		surf.id = staticModel->NumSurfaces(); // DG: make sure to initialize id; FIXME: or just set id to 0?
-		staticModel->AddSurface( surf );
-		staticModel->bounds.AddPoint( surf.geometry->bounds[0] );
-		staticModel->bounds.AddPoint( surf.geometry->bounds[1] );
+		// The vertex and index counts determine whether the existing triangle
+		// allocation can be reused.  The topology arrays are owned by this
+		// model's silInfos, not by the snapshot.
+		srfTriangles_t *tri = surf->geometry;
+		if ( tri && ( tri->numVerts != surface->numVerts || tri->numIndexes != silInfo.numIndexes ) ) {
+			R_FreeStaticTriSurf( tri );
+			surf->geometry = NULL;
+			tri = NULL;
+		}
+		if ( !tri ) {
+			tri = R_AllocStaticTriSurf();
+			R_AllocStaticTriSurfVerts( tri, surface->numVerts );
+			surf->geometry = tri;
+		} else {
+			// Vertex positions are about to change.  Drop any cached GPU
+			// copy (ambient, shadow and index caches) while retaining the
+			// CPU-side vertex allocation.
+			R_FreeStaticTriSurfVertexCaches( tri );
+		}
+
+		surf->shader = GetSurfaceMaterial( surface );
+
+		FillSurface( tri, surface, silInfo, backlerp, frame, oldframe );
+
+		staticModel->bounds.AddPoint( tri->bounds[0] );
+		staticModel->bounds.AddPoint( tri->bounds[1] );
 
 		// find the next surface
 		surface = (mdcSurface_t *)( (byte *)surface + surface->ofsEnd );
@@ -563,25 +792,31 @@ idRenderModel *idRenderModelMDC::InstantiateDynamicModel( const struct renderEnt
 idRenderModelMDC::Bounds
 =====================
 */
-
-idBounds idRenderModelMDC::Bounds(const struct renderEntity_s *ent) const {
+idBounds idRenderModelMDC::Bounds( const struct renderEntity_s *ent ) const {
 	idBounds		ret;
 
 	ret.Clear();
 
-	if (!ent || !mdc) {
+	if ( !ent || !mdc ) {
 		// just give it the editor bounds
-		ret.AddPoint(idVec3(-10,-10,-10));
-		ret.AddPoint(idVec3( 10, 10, 10));
+		ret.AddPoint( idVec3( -10, -10, -10 ) );
+		ret.AddPoint( idVec3(  10,  10,  10 ) );
 		return ret;
 	}
 
-	mdcFrame_t	*frame = (mdcFrame_t *)( (byte *)mdc + mdc->ofsFrames );
-	int frameNum = Max(0, Min(mdc->numFrames-1, (int)ent->shaderParms[SHADERPARM_MD3_FRAME]));
-	frame += frameNum; // DG: use bounds of current frame
+	const mdcFrame_t *frames = (const mdcFrame_t *)( (const byte *)mdc + mdc->ofsFrames );
+	const int frameNum = idMath::ClampInt( 0, mdc->numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME] );
+	const int oldFrameNum = idMath::ClampInt( 0, mdc->numFrames - 1, ent->shaderParms[SHADERPARM_MD3_LASTFRAME] );
 
-	ret.AddPoint( frame->bounds[0] );
-	ret.AddPoint( frame->bounds[1] );
+	// DG: use bounds of current frame
+	ret.AddPoint( frames[frameNum].bounds[0] );
+	ret.AddPoint( frames[frameNum].bounds[1] );
+
+	// while interpolating the mesh is a blend of both frames
+	if ( oldFrameNum != frameNum && ent->shaderParms[SHADERPARM_MD3_BACKLERP] > 0.0f ) {
+		ret.AddPoint( frames[oldFrameNum].bounds[0] );
+		ret.AddPoint( frames[oldFrameNum].bounds[1] );
+	}
 
 	return ret;
 }
@@ -591,8 +826,7 @@ idBounds idRenderModelMDC::Bounds(const struct renderEntity_s *ent) const {
 idRenderModelMDC::BuildSilInfo
 =====================
 */
-
-silInfo_t idRenderModelMDC::BuildSilInfo(mdcSurface_t *surf ) {
+silInfo_t idRenderModelMDC::BuildSilInfo( mdcSurface_t *surf ) {
 	//
 	// build the information that will be common to all animations of this surface:
 	// silhouette edge connectivity and normal / tangent generation information
@@ -600,47 +834,45 @@ silInfo_t idRenderModelMDC::BuildSilInfo(mdcSurface_t *surf ) {
 	int numVerts = surf->numVerts;
 	silInfo_t ret = {0};
 
-	mdcXyzNormal_t *xyzs = (mdcXyzNormal_t *) ( (byte *)surf + surf->ofsXyzNormals );
-
 	bool onStack;
-	idDrawVert *verts = (idDrawVert*)Mem_MallocA( numVerts*sizeof(idDrawVert), onStack );
-
-	for ( int i=0; i < numVerts; ++i ) {
-		idDrawVert& v = verts[i];
-		v.Clear();
-		// Note: MDC defines these for all frames - using frame 0 here
-		short* xyz = xyzs[i].xyz;
-		v.xyz.x = xyz[0] * float(MDC_XYZ_SCALE);
-		v.xyz.y = xyz[1] * float(MDC_XYZ_SCALE);
-		v.xyz.z = xyz[2] * float(MDC_XYZ_SCALE);
-		// Note: idDrawVert has more fields, but R_CreateSilIndexes() and R_IdentifySilEdges()
-		//       only use .xyz
-	}
+	idDrawVert *verts = (idDrawVert *)Mem_MallocA( numVerts * sizeof( idDrawVert ), onStack );
 
 	int numIndexes = surf->numTriangles * 3;
-	mdcTriangle_t * mdcTriIdx = (mdcTriangle_t *) ( (byte *)surf + surf->ofsTriangles );
-	int *triIndexes = (int*)mdcTriIdx->indexes;
+	mdcTriangle_t *mdcTriIdx = (mdcTriangle_t *)( (byte *)surf + surf->ofsTriangles );
+	int *triIndexes = (int *)mdcTriIdx->indexes;
 
 	srfTriangles_t tri;
 	memset( &tri, 0, sizeof( tri ) );
 
+	for ( int i = 0; i < numVerts; ++i ) {
+		verts[i].Clear();
+	}
 	tri.verts = verts;
-	tri.numVerts = numVerts;
+
+	// Use frame 0 *including* its compressed offsets, so this is exactly what
+	// the first animation frame looks like.  (Only .xyz is used by
+	// R_CreateSilIndexes() and R_IdentifySilEdges().)
+	tri.numVerts = 0;
+	LerpMeshVertexes( &tri, surf, 0.0f, 0, 0 );
+
 	tri.numIndexes = numIndexes;
-	if ( sizeof(triIndexes[0]) == sizeof(tri.indexes[0]) ) {
+	if ( sizeof( triIndexes[0] ) == sizeof( tri.indexes[0] ) ) {
 		tri.indexes = triIndexes;
 	} else {
 		R_AllocStaticTriSurfIndexes( &tri, numIndexes );
 		// don't memcpy, so we can change the index type from int to short without changing the interface
-		for ( int i = 0 ; i < numIndexes ; i++ ) {
+		for ( int i = 0; i < numIndexes; i++ ) {
 			tri.indexes[i] = triIndexes[i];
 		}
 	}
-	R_CreateSilIndexes(&tri); // allocates and sets tri.silIndexes with triSilIndexAllocator
-	// if there's only one frame (no animation), the omitCoplanarEdges optimization can be used
-	// (otherwise it can't because edges that are coplanar in frame 0 may not be in another frame)
-	bool omitCoplanarEdges = (surf->numBaseFrames == 1);
-	R_IdentifySilEdges(&tri, omitCoplanarEdges); // allocates and sets tri.silEdges with triSilEdgeAllocator
+	R_CreateSilIndexes( &tri ); // allocates and sets tri.silIndexes with triSilIndexAllocator
+	// Only if the whole model has a single frame (no animation) can the
+	// omitCoplanarEdges optimization be used, otherwise edges that are coplanar
+	// in frame 0 may not be in another frame.  NOTE: this must test the model's
+	// frame count, not surf->numBaseFrames: a surface with one base frame can
+	// still be animated through its compressed frames.
+	bool omitCoplanarEdges = ( mdc->numFrames == 1 );
+	R_IdentifySilEdges( &tri, omitCoplanarEdges ); // allocates and sets tri.silEdges with triSilEdgeAllocator
 
 	ret.numIndexes = tri.numIndexes;
 	ret.numSilEdges = tri.numSilEdges;
@@ -658,47 +890,28 @@ silInfo_t idRenderModelMDC::BuildSilInfo(mdcSurface_t *surf ) {
 idRenderModelMDC::DrawTags
 ====================
 */
-void idRenderModelMDC::DrawTags(const renderEntity_t* ent, const struct viewDef_s* view) const {
-	int					i, j;
-	int					num;
-	idVec3				pos;
-	mdcTag_t* tag;
-	mdcTagName_t* tagName;
-	idVec3				origin;
-	
-	int currentFrame = ent->shaderParms[SHADERPARM_MD3_FRAME];
-	tag = (mdcTag_t*)((byte*)mdc + mdc->ofsTags);
-	tag += currentFrame * mdc->numTags;
-
-	tagName = (mdcTagName_t*)((byte*)mdc + mdc->ofsTagNames);
-
-	for (i = 0; i < mdc->numTags; i++, tag++, tagName++) {
-		origin.x = tag->xyz[0] * MDC_XYZ_SCALE;
-		origin.y = tag->xyz[1] * MDC_XYZ_SCALE;
-		origin.z = tag->xyz[2] * MDC_XYZ_SCALE;
-		//tag->axis[0][j] = LittleFloat(tag->axis[0][j]);
-		//tag->axis[1][j] = LittleFloat(tag->axis[1][j]);
-		//tag->axis[2][j] = LittleFloat(tag->axis[2][j]);
-
-		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
-		float scale = r_jointNameScale.GetFloat();
-		pos = ent->origin + origin * ent->axis;
-		session->rw->DrawText(tagName->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
+void idRenderModelMDC::DrawTags( const renderEntity_t *ent, const struct viewDef_s *view ) const {
+	if ( mdc == NULL || view == NULL ) {
+		return;
 	}
-	
-	/*
-	if ((r_jointNameScale.GetFloat() != 0.0f) && (bounds.Expand(128.0f).ContainsPoint(view->renderView.vieworg - ent->origin))) {
-		idVec3	offset(0, 0, r_jointNameOffset.GetFloat());
-		float	scale;
 
-		scale = r_jointNameScale.GetFloat();
-		num = md3->numTags;
-		for (i = 0; i < num; i++) {
-			pos = ent->origin + tag->origin * ent->axis;
-			session->rw->DrawText(tag->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1);
-		}
+	// the frame must be clamped, shaderParms can hold anything
+	const int currentFrame = idMath::ClampInt( 0, mdc->numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME] );
+	const mdcTag_t *tag = (const mdcTag_t *)( (const byte *)mdc + mdc->ofsTags ) + currentFrame * mdc->numTags;
+	const mdcTagName_t *tagName = (const mdcTagName_t *)( (const byte *)mdc + mdc->ofsTagNames );
+
+	const idVec3 offset( 0, 0, r_jointNameOffset.GetFloat() );
+	const float scale = r_jointNameScale.GetFloat();
+
+	for ( int i = 0; i < mdc->numTags; i++, tag++, tagName++ ) {
+		idVec3 origin;
+		origin.x = tag->xyz[0] * (float)MDC_XYZ_SCALE;
+		origin.y = tag->xyz[1] * (float)MDC_XYZ_SCALE;
+		origin.z = tag->xyz[2] * (float)MDC_XYZ_SCALE;
+
+		const idVec3 pos = ent->origin + origin * ent->axis;
+		session->rw->DrawText( tagName->name, pos + offset, scale, colorWhite, view->renderView.viewaxis, 1 );
 	}
-	*/
 }
 
 /*
@@ -706,15 +919,15 @@ void idRenderModelMDC::DrawTags(const renderEntity_t* ent, const struct viewDef_
 idRenderModelMDC::GetJointHandle
 ====================
 */
-jointHandle_t idRenderModelMDC::GetJointHandle(const char* name) const {
-	int	i;
+jointHandle_t idRenderModelMDC::GetJointHandle( const char *name ) const {
+	if ( mdc == NULL ) {
+		return INVALID_JOINT;
+	}
 
-	mdcTagName_t* tagName;
+	const mdcTagName_t *tagName = (const mdcTagName_t *)( (const byte *)mdc + mdc->ofsTagNames );
 
-	tagName = (mdcTagName_t*)((byte*)mdc + mdc->ofsTagNames);
-
-	for (i = 0; i < mdc->numTags; i++, tagName++) {
-		if (idStr::Icmp(tagName->name, name) == 0) {
+	for ( int i = 0; i < mdc->numTags; i++, tagName++ ) {
+		if ( idStr::Icmp( tagName->name, name ) == 0 ) {
 			return (jointHandle_t)i;
 		}
 	}
@@ -727,16 +940,11 @@ jointHandle_t idRenderModelMDC::GetJointHandle(const char* name) const {
 idRenderModelMDC::GetJointName
 =====================
 */
-const char* idRenderModelMDC::GetJointName(jointHandle_t handle) const {
-	if ((handle < 0) || (handle >= mdc->numTags)) {
+const char *idRenderModelMDC::GetJointName( jointHandle_t handle ) const {
+	if ( mdc == NULL || handle < 0 || handle >= mdc->numTags ) {
 		return "<invalid joint>";
 	}
 
-	mdcTagName_t* tagName;
-
-	tagName = (mdcTagName_t*)((byte*)mdc + mdc->ofsTagNames);
-	tagName += handle;
-
-	return tagName->name;
-
+	const mdcTagName_t *tagName = (const mdcTagName_t *)( (const byte *)mdc + mdc->ofsTagNames );
+	return ( tagName + handle )->name;
 }

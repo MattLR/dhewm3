@@ -316,10 +316,13 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 		model->InitFromFile(modelName);
 		// DG: no idea why this needs special treatment, but otherwise
 		//     idRenderModelMD3::InstantiateDynamicModel() is called all the time
-		if (model->IsDefaultModel()) {
+		if ( model->IsDefaultModel() ) {
 			delete model;
 			return NULL;
 		}
+	} else if (extension.Icmp("tan") == 0) {
+			model = new idRenderModelTAN;
+			model->InitFromFile( modelName );
 	} else if ( extension.Icmp( "prt" ) == 0  ) {
 		model = new idRenderModelPrt;
 		model->InitFromFile( modelName );

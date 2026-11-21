@@ -207,8 +207,7 @@ private:
 ===============================================================================
 */
 
-struct md3Header_s;
-struct md3Surface_s;
+
 
 struct silInfo_t {
 	int numIndexes;
@@ -218,42 +217,42 @@ struct silInfo_t {
 	silEdge_t* silEdges;
 };
 
+struct md3Header_s;
+struct md3Surface_s;
+
 class idRenderModelMD3 : public idRenderModelStatic {
 public:
 	idRenderModelMD3();
-	~idRenderModelMD3();
+	virtual						~idRenderModelMD3();
 
-	virtual void				InitFromFile( const char *fileName );
+	virtual void				InitFromFile(const char* fileName);
 	virtual dynamicModel_t		IsDynamicModel() const;
-	virtual idRenderModel *		InstantiateDynamicModel( const struct renderEntity_s *ent, const struct viewDef_s *view, idRenderModel *cachedModel );
-	virtual idBounds			Bounds( const struct renderEntity_s *ent ) const;
-	//Dynamix
-	//virtual int					NumJoints(void) const;
+	virtual idRenderModel*		InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
+	virtual idBounds			Bounds(const struct renderEntity_s* ent) const;
+	virtual const idJointQuat*	GetDefaultPose(void) const;
 	virtual jointHandle_t		GetJointHandle(const char* name) const;
 	virtual const char*			GetJointName(jointHandle_t handle) const;
-	virtual const idJointQuat*	GetDefaultPose(void) const;
-
-
 
 private:
 	int							index;			// model = tr.models[model->index]
 	int							dataSize;		// just for listing purposes
-	struct md3Header_s *		md3;			// only if type == MOD_MESH
+	struct md3Header_s*			md3;			// only if type == MOD_MD3
 	int							numLods;
-	idList<const idMaterial*>	shaders;		// DG: md3Shader_t::shaderIndex indexes into this array
-	// Dynamix
-	idList<idJointQuat>			defaultPose;	// Hack for getting tag positions
 
-	// DG: added the following so we can generate/store sil edges for shadows
-	idList<silInfo_t>			silInfos;		// used to create srfTriangles_t from base frames and new vertexes (md3->numSurfaces entries)
+	idList<silInfo_t>			silInfos;		// one per surface, shared by every snapshot
+	idList<idJointQuat>			defaultPose;	// tag poses for the game side
+	idList<const idMaterial*>	shaders;		// <-- keep whatever type your MD3 class uses for this
 
-	struct silInfo_t			BuildSilInfo(struct md3Surface_s* surf);
-
-	void						LerpMeshVertexes( srfTriangles_t *tri, const struct md3Surface_s *surf, const float backlerp, const int frame, const int oldframe ) const;
-	
-	//Dynamix
+	void						LerpMeshVertexes(srfTriangles_t* tri, const struct md3Surface_s* surf, const float backlerp, const int frame, const int oldframe) const;
+	silInfo_t					BuildSilInfo(md3Surface_s* surf);
 	void						DrawTags(const renderEntity_t* ent, const struct viewDef_s* view) const;
-	void						CreateSurfaces(void);
+
+	// NEW
+	void						FreeData();
+	void						CreateSurfaces();
+	void						UpdateTagPose(int frame, int oldframe, float backlerp);
+	const idMaterial*			GetSurfaceMaterial(const md3Surface_s* surface) const;
+	void						FillSurface(srfTriangles_t* tri, const md3Surface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe) const;
 };
 
 /*
@@ -270,37 +269,66 @@ struct mdcSurface_s;
 class idRenderModelMDC : public idRenderModelStatic {
 public:
 	idRenderModelMDC();
-	~idRenderModelMDC();
+	virtual						~idRenderModelMDC();
 
 	virtual void				InitFromFile(const char* fileName);
 	virtual dynamicModel_t		IsDynamicModel() const;
 	virtual idRenderModel*		InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
 	virtual idBounds			Bounds(const struct renderEntity_s* ent) const;
-	//Dynamix
-	//virtual int				NumJoints(void) const;
+	virtual const idJointQuat*	GetDefaultPose(void) const;
 	virtual jointHandle_t		GetJointHandle(const char* name) const;
 	virtual const char*			GetJointName(jointHandle_t handle) const;
-	virtual const idJointQuat*	GetDefaultPose(void) const;
-
 
 private:
 	int							index;			// model = tr.models[model->index]
 	int							dataSize;		// just for listing purposes
-	struct mdcHeader_s*			mdc;			// only if type == MOD_MESH
+	struct mdcHeader_s*			mdc;			// only if type == MOD_MDC
 	int							numLods;
-	idList<const idMaterial*>	shaders;		// DG: mdcShader_t::shaderIndex indexes into this array
-	// Dynamix
-	idList<idJointQuat>			defaultPose;	// Hack for getting tag positions
 
-	// DG: added the following so we can generate/store sil edges for shadows
-	idList<silInfo_t>			silInfos;		// used to create srfTriangles_t from base frames and new vertexes (mdc->numSurfaces entries)
-
-	struct silInfo_t			BuildSilInfo(struct mdcSurface_s* surf);
+	idList<silInfo_t>			silInfos;		// one per surface, shared by every snapshot
+	idList<idJointQuat>			defaultPose;	// tag poses for the game side
+	idList<const idMaterial*>	shaders;		// <-- keep whatever type your MD3 class uses for this
 
 	void						LerpMeshVertexes(srfTriangles_t* tri, const struct mdcSurface_s* surf, const float backlerp, const int frame, const int oldframe) const;
-
-	//Dynamix
+	silInfo_t					BuildSilInfo(mdcSurface_s* surf);
 	void						DrawTags(const renderEntity_t* ent, const struct viewDef_s* view) const;
+
+	// NEW
+	void						FreeData();
+	void						CreateSurfaces();
+	void						UpdateTagPose(int frame, int oldframe, float backlerp);
+	const idMaterial*			GetSurfaceMaterial(const mdcSurface_s* surface) const;
+	void						FillSurface(srfTriangles_t* tri, const mdcSurface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe) const;
+};
+
+struct tanHeader_s;
+struct tanSurface_s;
+
+class idRenderModelTAN : public idRenderModelStatic {
+public:
+	idRenderModelTAN();
+	virtual						~idRenderModelTAN();
+
+	virtual void				InitFromFile(const char* fileName);
+	virtual dynamicModel_t		IsDynamicModel() const;
+	virtual const idJointQuat*	GetDefaultPose(void) const;
+	virtual jointHandle_t		GetJointHandle(const char* name) const;
+	virtual const char*			GetJointName(jointHandle_t handle) const;
+
+private:
+	int							index;			// model = tr.models[model->index]
+	int							dataSize;		// just for listing purposes
+	struct tanHeader_s*			tan;			// swapped file data, owned
+
+	idList<silInfo_t>			silInfos;		// one per surface, own their indexes
+	idList<idJointQuat>			defaultPose;	// first frame tag poses for the game side
+	idList<const idMaterial*>	shaders;		// <-- keep whatever type your MD3 class uses for this
+
+	void						FreeData();
+	void						CreateSurfaces();
+	void						SetupTagPose();
+	silInfo_t					BuildSilInfo(struct tanSurface_s* surf);
+	const idMaterial*			FindMaterialFor(const struct tanSurface_s* surface) const;
 };
 
 /*
