@@ -341,6 +341,9 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 	} else if (extension.Icmp("glm") == 0) {
 		model = new idRenderModelMDX;
 		model->InitFromFile(modelName);
+	} else if (extension.Icmp("skb") == 0) {
+		model = new idRenderModelSKB;
+		model->InitFromFile(modelName);
 	} else {
 
 		if ( extension.Length() ) {

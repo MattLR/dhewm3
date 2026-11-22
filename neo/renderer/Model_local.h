@@ -618,6 +618,30 @@ private:
 
 };
 
+/*
+===============================================================================
+
+	SKB model, default pose only
+
+	Poses the mesh with the base frame stored in the .skb itself and bakes it
+	into ordinary static surfaces. The .ska animation files are never opened,
+	and there are no joints, so this is for props / weapons / anything that
+	just needs to be drawn standing still.
+
+===============================================================================
+*/
+class idRenderModelSKB : public idRenderModelStatic {
+public:
+	idRenderModelSKB();
+
+	virtual void				InitFromFile(const char* fileName);
+	virtual void				LoadModel();
+
+private:
+	bool						LoadSKBFile(const byte* buffer, int filesize);
+	const idMaterial*			FindSurfaceMaterial(const char* surfaceName) const;
+};
+
 //#define	LL(x) x=LittleLong(x)
 // FIXME so stupid Dynamix
 #define	LL(x) x=x
