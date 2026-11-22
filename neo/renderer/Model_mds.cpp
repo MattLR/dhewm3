@@ -1056,6 +1056,7 @@ idRenderModelMDM::idRenderModelMDM
 idRenderModelMDM::idRenderModelMDM() {
 	dataSize = 0;
 	modelData = nullptr;
+	mdxData = nullptr;
 	cachedModel = nullptr;
 }
 
@@ -1068,6 +1069,11 @@ idRenderModelMDM::~idRenderModelMDM() {
 	if ( modelData ) {
 		Mem_Free(modelData);
 		modelData = nullptr;
+	}
+
+	if ( mdxData ) {
+		Mem_Free(mdxData);
+		mdxData = nullptr;
 	}
 
 	if ( cachedModel ) {
@@ -1123,6 +1129,9 @@ void idRenderModelMDM::LoadModel( void ) {
 		fileSystem->FreeFile(mdsMeshBuffer);
 		return;
 	}
+
+	// Convert the MDX anims to md5anim if it doesn't exist
+	WriteAnimToDisk();
 
 	// If we don't have any frames, then render as a static mesh.
 	//if (modelData->numFrames == 1)
@@ -1332,25 +1341,308 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 		surf = (mdmSurface_t *)((byte *)surf + surf->ofsEnd);
 	}
 
-	joints.SetGranularity(1);
-	joints.SetNum(53);
-	defaultPose.SetGranularity(1);
-	defaultPose.SetNum(53);
+	// The MDM has no skeleton, the joints and the default pose come from the MDX
+	// FIXME Dynamix - the MDX is hardcoded for now, the .char file will tell us which one to use
+	if ( !LoadMDXFile() ) {
+		return false;
+	}
 
-	// FIXME Dynamix
-	for ( int i = 0; i < 53; i++ ) {
-		if ( i == 0 ) {
-			joints[i].name = "origin";
-			joints[i].parent = NULL;
-		} else {
-			joints[i].name = va("bone%d", i);
-			joints[i].parent = &joints[0];
+	return true;
+}
+
+/*
+========================
+idRenderModelMDM::LoadMDXFile
+
+Loads the MDX that goes with this MDM and builds the Doom 3 side of the skeleton from it:
+  - joints: bone hierarchy and names (bone 0 is the root and is called "origin" like the MDS loader)
+  - defaultPose: frame 0 of the MDX, parent relative, same data the .md5anim baseframe will hold
+
+The MDX is hardcoded to the MDM's own name with an .mdx extension (body.mdm -> body.mdx) for now.
+========================
+*/
+bool idRenderModelMDM::LoadMDXFile( void ) {
+	void*				buffer;
+	int					filesize;
+	mdxHeader_t*		pinmodel;
+	mdxHeader_t*		mdx;
+	mdxBoneInfo_t*		boneInfo;
+	int					i, size, numBones, numFrames, frameSize, ofsFrames, ofsBones;
+
+	// FIXME Dynamix - hardcoded, to be replaced by the .char file lookup
+	mdxName = name;
+	mdxName.SetFileExtension("mdx");
+
+	filesize = fileSystem->ReadFile(mdxName, &buffer);
+	if ( filesize <= 0 || buffer == nullptr ) {
+		common->Warning("R_LoadMDX: Failed to load %s for MDM model %s\n", mdxName.c_str(), name.c_str());
+		return false;
+	}
+
+	pinmodel = (mdxHeader_t*)buffer;
+
+	if ( filesize < (int)sizeof(mdxHeader_t) ) {
+		common->Warning("R_LoadMDX: %s is too small to be an MDX\n", mdxName.c_str());
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	if ( LittleLong2(pinmodel->ident) != MDX_IDENT ) {
+		common->Warning("R_LoadMDX: %s is not an MDX file\n", mdxName.c_str());
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	if ( LittleLong2(pinmodel->version) != MDX_VERSION ) {
+		common->Warning("R_LoadMDX: %s has wrong version (%i should be %i)\n", mdxName.c_str(), pinmodel->version, MDX_VERSION);
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	size = LittleLong2(pinmodel->ofsEnd);
+	if ( size > filesize || size < (int)sizeof(mdxHeader_t) ) {
+		common->Warning("R_LoadMDX: Header of %s is broken. Wrong filesize declared!\n", mdxName.c_str());
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	numBones = LittleLong2(pinmodel->numBones);
+	if ( numBones < 1 || numBones > MDX_MAX_BONES ) {
+		common->Warning("R_LoadMDX: %s has %i bones (max %i)\n", mdxName.c_str(), numBones, MDX_MAX_BONES);
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	numFrames = LittleLong2(pinmodel->numFrames);
+	if ( numFrames < 1 ) {
+		common->Warning("R_LoadMDX: %s has no frames\n", mdxName.c_str());
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	// Every frame is an mdxFrame_t followed by one compressed bone frame per bone
+	frameSize = (int)(sizeof(mdxFrame_t) + numBones * sizeof(mdxBoneFrameCompressed_t));
+	ofsFrames = LittleLong2(pinmodel->ofsFrames);
+	ofsBones = LittleLong2(pinmodel->ofsBones);
+
+	if ( ofsFrames < (int)sizeof(mdxHeader_t) || (long long)ofsFrames + (long long)numFrames * frameSize > size ||
+		ofsBones < (int)sizeof(mdxHeader_t) || (long long)ofsBones + (long long)numBones * (long long)sizeof(mdxBoneInfo_t) > size ) {
+		common->Warning("R_LoadMDX: %s has frame or bone data outside of the file\n", mdxName.c_str());
+		fileSystem->FreeFile(buffer);
+		return false;
+	}
+
+	// Keep a copy of the file, the anims get converted from it later.
+	// The header counts and offsets are only read through the checked values above, and like the
+	// rest of this file the frame and bone data is not byte swapped (little endian only).
+	if ( mdxData ) {
+		dataSize -= mdxData->ofsEnd;
+		Mem_Free(mdxData);
+		mdxData = nullptr;
+	}
+
+	dataSize += size;
+	mdxData = mdx = (mdxHeader_t*)Mem_Alloc(size);
+	memcpy(mdx, buffer, size);
+	fileSystem->FreeFile(buffer);
+
+	// The joint transform code needs a parent to always come before its children
+	boneInfo = (mdxBoneInfo_t*)((byte*)mdx + mdx->ofsBones);
+	for ( i = 1; i < numBones; i++ ) {
+		if ( boneInfo[i].parent < 0 || boneInfo[i].parent >= i ) {
+			common->Warning("R_LoadMDX: %s bone %i (%s) has parent %i, parents must come before their children\n",
+				mdxName.c_str(), i, boneInfo[i].name, boneInfo[i].parent);
+			Mem_Free(mdxData);
+			mdxData = nullptr;
+			dataSize -= size;
+			return false;
 		}
 	}
 
-	// FIXME Dynamix
-	// Defaultpose here for now - Dynamix
+	// Joints, bone 0 is always the root. Doom 3 matches joints by name so the spaces are replaced.
+	joints.SetGranularity(1);
+	joints.SetNum(numBones);
+	for ( i = 0; i < numBones; i++ ) {
+		if ( i == 0 ) {
+			joints[i].parent = NULL;
+			joints[i].name = "origin";
+		} else {
+			joints[i].parent = &joints[boneInfo[i].parent];
+			joints[i].name = SanitizeJointName(boneInfo[i].name);
+		}
+	}
 
+	// Default pose from frame 0
+	idList<idJointMat> boneData;
+	boneData.SetGranularity(1);
+	boneData.SetNum(numBones);
+	CalcBones(boneData, 0);
+
+	defaultPose.SetGranularity(1);
+	defaultPose.SetNum(numBones);
+	for ( i = 0; i < numBones; i++ ) {
+		idJointQuat jointQuat = boneData[i].ToJointQuat();
+
+		// md5anim only stores x, y, z and rebuilds w as positive, go through the same
+		// conversion here so the model default pose and the anim baseframe always agree
+		jointQuat.q = jointQuat.q.ToCQuat().ToQuat();
+
+		defaultPose[i] = jointQuat;
+	}
+
+	common->DPrintf("MDM %s: %i joints from %s, default pose from frame 0 of %i frames\n",
+		name.c_str(), numBones, mdxName.c_str(), mdx->numFrames);
+
+	return true;
+}
+
+/*
+========================
+idRenderModelMDM::CalcBones
+
+Same maths as idRenderModelMDS::CalcBones, but reads the MDX. Leaves boneData in the form
+.md5anim wants: every bone relative to its parent, bone 0 in model space.
+========================
+*/
+void idRenderModelMDM::CalcBones( idList<idJointMat>& boneData, int currentFrame ) const {
+	const mdxHeader_t*					header = mdxData;
+	const int							numBones = header->numBones;
+	const int							frameSize = (int)(sizeof(mdxFrame_t) + numBones * sizeof(mdxBoneFrameCompressed_t));
+	const float							compNum = (360.0f / 65536.0f);
+
+	currentFrame = idMath::ClampInt(0, header->numFrames - 1, currentFrame);
+
+	const mdxFrame_t*					frame = (const mdxFrame_t*)((const byte*)header + header->ofsFrames + currentFrame * frameSize);
+	const mdxBoneFrameCompressed_t*		compBones = (const mdxBoneFrameCompressed_t*)(frame + 1);
+	const mdxBoneInfo_t*				boneInfo = (const mdxBoneInfo_t*)((const byte*)header + header->ofsBones);
+
+	// Uncompress the bones into boneData, as absolute transforms. The angles are model space
+	// orientations and ofsAngles is the model space direction from the parent to this bone.
+	for ( int i = 0; i < numBones; i++ ) {
+		const mdxBoneInfo_t*				thisBoneInfo = &boneInfo[i];
+		const mdxBoneFrameCompressed_t*		compBone = &compBones[i];
+
+		idMat3 boneRotMat = idAngles(compBone->angles[0] * compNum, compBone->angles[1]
+			* compNum, compBone->angles[2] * compNum).ToMat3();
+
+		idMat3 offsetDir = idAngles(compBone->ofsAngles[0] * compNum, compBone->ofsAngles[1]
+			* compNum, 0.0f).ToMat3();
+
+		idVec3 offsetVec = idVec3(thisBoneInfo->parentDist, 0, 0) * offsetDir;
+
+		if ( i == 0 ) {
+			// one bone is an ascendant of all the others, it starts the hierarchy at parentOffset
+			boneData[i].SetRotation(boneRotMat.Transpose());
+			boneData[i].SetTranslation(frame->parentOffset);
+		} else {
+			boneData[i].SetRotation(boneRotMat.Transpose());
+			boneData[i].SetTranslation(boneData[thisBoneInfo->parent].ToVec3() + offsetVec);
+		}
+	}
+
+	// Only fine if parent is always earlier in the joint layout, LoadMDXFile checks that
+	// Untransform the joints to .md5anim format
+	for ( int i = numBones - 1; i > 0; i-- ) {
+		boneData[i] /= boneData[boneInfo[i].parent];
+	}
+}
+
+// FIXME Dynamix - the MDX doesn't store a frame rate, that lives in the animation config.
+// Hardcoded until the .char file / anim config is parsed.
+#define MDM_ANIM_FRAMERATE		20
+
+/*
+========================
+idRenderModelMDM::WriteAnimToDisk
+
+Dumps the whole MDX as a single .md5anim next to it, with the same layout
+idRenderModelMDS::WriteAnimToDisk writes (every joint fully animated, baseframe = frame 0).
+Skipped if the file already exists, delete it to regenerate.
+FIXME Dynamix - one big anim for now, the anim config ranges will split it up later
+========================
+*/
+bool idRenderModelMDM::WriteAnimToDisk( void ) {
+	idFile*						fp;
+	idStr						animName;
+	const mdxHeader_t*			header = mdxData;
+
+	if ( !header ) {
+		return false;
+	}
+
+	const int					numBones = header->numBones;
+	const int					numFrames = header->numFrames;
+	const int					frameSize = (int)(sizeof(mdxFrame_t) + numBones * sizeof(mdxBoneFrameCompressed_t));
+	const mdxBoneInfo_t*		boneInfo = (const mdxBoneInfo_t*)((const byte*)header + header->ofsBones);
+
+	animName = mdxName;
+	animName.SetFileExtension("md5anim");
+
+	if ( findFile_t test = fileSystem->FindFile(animName, 0) ) {
+		common->DPrintf("Found %s for MDM model, skipping file generation\n", animName.c_str());
+		return true;
+	}
+
+	common->Printf("Writing %s\n", animName.c_str());
+	fp = fileSystem->OpenFileWrite(animName, "fs_devpath");
+
+	if ( !fp ) {
+		common->Warning("WriteAnims: Error opening file %s\n", animName.c_str());
+		return false;
+	}
+
+	idList<idJointMat> boneData;
+	boneData.SetGranularity(1);
+	boneData.SetNum(numBones);
+
+	fp->WriteFloatString("MD5Version 10\n\ncommandline \"\"\n");
+
+	fp->WriteFloatString("numFrames %d\n", numFrames);
+	fp->WriteFloatString("numJoints %d\n", numBones);
+	fp->WriteFloatString("frameRate %d\n", MDM_ANIM_FRAMERATE);
+	fp->WriteFloatString("numAnimatedComponents %d\n\n", numBones * 6);
+
+	fp->WriteFloatString("hierarchy {\n");
+	for ( int i = 0; i < numBones; i++ ) {
+		if ( i == 0 ) {
+			fp->WriteFloatString("\t\"origin\" -1 63 0\n");
+		} else {
+			fp->WriteFloatString("\t\"%s\" %d 63 %d\n", joints[i].name.c_str(), boneInfo[i].parent, i * 6);
+		}
+	}
+	fp->WriteFloatString("}\n\n");
+
+	fp->WriteFloatString("bounds {\n");
+	for ( int i = 0; i < numFrames; i++ ) {
+		const mdxFrame_t* frame = (const mdxFrame_t*)((const byte*)header + header->ofsFrames + i * frameSize);
+
+		fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", frame->bounds[0].x, frame->bounds[0].y, frame->bounds[0].z,
+			frame->bounds[1].x, frame->bounds[1].y, frame->bounds[1].z);
+	}
+	fp->WriteFloatString("}\n\n");
+
+	// Baseframe, same as the default pose: frame 0
+	CalcBones(boneData, 0);
+	fp->WriteFloatString("baseframe {\n");
+	for ( int i = 0; i < numBones; i++ ) {
+		idJointQuat jointQuat = boneData[i].ToJointQuat();
+		idCQuat cQuat = jointQuat.q.ToCQuat();
+		fp->WriteFloatString("( %f %f %f ) ( %f %f %f )\n", jointQuat.t.x, jointQuat.t.y, jointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+	}
+	fp->WriteFloatString("}\n\n");
+
+	for ( int i = 0; i < numFrames; i++ ) {
+		CalcBones(boneData, i);
+		fp->WriteFloatString("frame %d {\n", i);
+		for ( int k = 0; k < numBones; k++ ) {
+			idJointQuat jointQuat = boneData[k].ToJointQuat();
+			idCQuat cQuat = jointQuat.q.ToCQuat();
+			fp->WriteFloatString("%f %f %f %f %f %f\n", jointQuat.t.x, jointQuat.t.y, jointQuat.t.z, cQuat.x, cQuat.y, cQuat.z);
+		}
+		fp->WriteFloatString("}\n\n");
+	}
+
+	fileSystem->CloseFile(fp);
 	return true;
 }
 

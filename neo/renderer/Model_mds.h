@@ -309,6 +309,67 @@ typedef struct mdmHeader_t {
 };
 
 /*
+==============================================================================
+
+MDX file format (Wolfenstein Skeletal Data)
+
+version history:
+	1 - initial version
+	2 - moved parentOffset from the mesh to the skeletal data file
+
+==============================================================================
+*/
+
+#define MDX_IDENT           ( ( 'W' << 24 ) + ( 'X' << 16 ) + ( 'D' << 8 ) + 'M' )
+#define MDX_VERSION         2
+#define MDX_MAX_BONES       128
+
+typedef struct {
+	idVec3 bounds[2];               // bounds of this frame
+	idVec3 localOrigin;             // midpoint of bounds, used for sphere cull
+	float radius;                   // dist from localOrigin to corner
+	idVec3 parentOffset;            // one bone is an ascendant of all other bones, it starts the hierachy at this position
+} mdxFrame_t;
+
+typedef struct {
+	//float		angles[3];
+	//float		ofsAngles[2];
+	short angles[4];                // to be converted to axis at run-time (this is also better for lerping)
+	short ofsAngles[2];             // PITCH/YAW, head in this direction from parent to go to the offset position
+} mdxBoneFrameCompressed_t;
+
+// NOTE: this only used at run-time
+// FIXME: do we really need this?
+typedef struct {
+	float matrix[3][3];             // 3x3 rotation
+	idVec3 translation;             // translation vector
+} mdxBoneFrame_t;
+
+typedef struct {
+	char name[MAX_MDSPATH];           // name of bone
+	int parent;                     // not sure if this is required, no harm throwing it in
+	float torsoWeight;              // scale torso rotation about torsoParent by this
+	float parentDist;
+	int flags;
+} mdxBoneInfo_t;
+
+typedef struct {
+	int ident;
+	int version;
+
+	char name[MAX_MDSPATH];           // model name
+
+	// bones are shared by all levels of detail
+	int numFrames;
+	int numBones;
+	int ofsFrames;                  // (mdxFrame_t + mdxBoneFrameCompressed_t[numBones]) * numframes
+	int ofsBones;                   // mdxBoneInfo_t[numBones]
+	int torsoParent;                // index of bone that is the parent of the torso
+
+	int ofsEnd;                     // end of file
+} mdxHeader_t;
+
+/*
 ===============================================================================
 
 	ET MDM/X Skeletal Model
@@ -337,6 +398,9 @@ public:
 	virtual void				SetJoint(int index, int parentNum, idStr name);
 private:
 	bool						LoadMDMFile(void* buffer, int filesize);
+	bool						LoadMDXFile(void);
+	bool						WriteAnimToDisk(void);
+	void						CalcBones(idList<idJointMat>& boneData, int currentFrame) const;
 	void						RenderFramesToModel(idRenderModelStatic* staticModel, const struct viewDef_s* view, int scale, int frame, const renderEntity_t* ent2);
 
 	idList<idMD5Joint>			joints;
@@ -351,6 +415,11 @@ private:
 
 	int							dataSize;
 	struct mdmHeader_t*			modelData;
+
+	// The MDM is mesh only, the bones and the per frame bone data live in the MDX.
+	// The whole file is kept so anims can be converted from it later (see CalcBones).
+	mdxHeader_t*				mdxData;
+	idStr						mdxName;
 
 	idRenderModelStatic*		cachedModel;
 
