@@ -1051,19 +1051,27 @@ static bool R_TAN_SwapAndValidate( tanHeader_t* tan, int size, const char* fileN
 
 /*
 =================
-R_TAN_DecodeFrame0
+R_TAN_DecodeFrame
 
 Decodes the (first frame) vertex positions of a surface.
 Positions are value * scale + offset, using the model's first frame.
 =================
 */
-static void R_TAN_DecodeFrame0( idDrawVert* out, const tanSurface_t* surf, const tanFrame_t* frame0) {
-	const tanXyzNormal_t* xyz = (const tanXyzNormal_t*)((const byte*)surf + surf->ofsXyzNormals );
+static void R_TAN_DecodeFrame( idDrawVert* out, const tanSurface_t* surf, const tanFrame_t* frame, int frameNum ) {
+	const tanXyzNormal_t* xyz = (const tanXyzNormal_t*)((const byte*)surf + surf->ofsXyzNormals);
 
-	for ( int i = 0; i < surf->numVerts; i++, xyz++ ) {
-		out[i].xyz.x = xyz->xyz[0] * frame0->scale[0] + frame0->offset[0];
-		out[i].xyz.y = xyz->xyz[1] * frame0->scale[1] + frame0->offset[1];
-		out[i].xyz.z = xyz->xyz[2] * frame0->scale[2] + frame0->offset[2];
+	xyz += frameNum * surf->numVerts;
+
+	for ( int i = 0; i < surf->numVerts; i++, xyz++ )
+	{
+		out[i].xyz.x =
+			xyz->xyz[0] * frame->scale[0] + frame->offset[0];
+
+		out[i].xyz.y =
+			xyz->xyz[1] * frame->scale[1] + frame->offset[1];
+
+		out[i].xyz.z =
+			xyz->xyz[2] * frame->scale[2] + frame->offset[2];
 	}
 }
 
@@ -1179,10 +1187,11 @@ bool idRenderModelTAN::ParseTikiFile( const char* fileName )
 				// -------------------------------------------------
 				// MODEL DIRECTORY
 				// -------------------------------------------------
-				if ( token.Icmp("path") == 0 ) {
-					idToken pathToken;
+				if (token.Icmp("path") == 0)
+				{
+					idStr pathValue;
 
-					if ( !lexer.ReadTokenOnLine(&pathToken) )
+					if (!TIKI_ReadPathToken(lexer, pathValue))
 					{
 						common->Warning(
 							"Missing path value in TIKI file '%s'",
@@ -1191,22 +1200,11 @@ bool idRenderModelTAN::ParseTikiFile( const char* fileName )
 						continue;
 					}
 
-					tikiPath = pathToken.c_str();
+					// Replace hyphens if required by the asset naming convention.
+					// Do NOT replace them in model paths unless the actual directory
+					// on disk uses underscores.
 
-					// Remove any trailing slash so AppendPath()
-					// can join the directory and filename cleanly.
-					while ( tikiPath.Length() > 0 )
-					{
-						char lastChar =
-							tikiPath[tikiPath.Length() - 1];
-
-						if ( lastChar != '/' && lastChar != '\\' ) {
-							break;
-						}
-
-						tikiPath.StripTrailing('/');
-						tikiPath.StripTrailing('\\');
-					}
+					tikiPath = pathValue;
 
 					common->Printf(
 						"TIKI: setup path = '%s'\n",
@@ -1454,10 +1452,18 @@ void idRenderModelTAN::InitFromFile( const char* fileName ) {
 		surf = (tanSurface_t*)((byte*)surf + surf->ofsEnd);
 	}
 
-	// tag pose of the first frame
-	SetupTagPose();
+	// Initialise tag poses from frame zero.
+	UpdateTagPose(0, 0, 0.0f);
 
-	CreateSurfaces();
+	// Single-frame models can use static geometry.
+	// Animated models generate geometry per entity.
+	if (tan->numFrames == 1)
+	{
+		CreateSurfaces();
+	}
+
+	// Mark the model as successfully loaded.
+	purged = false;
 
 	// idRenderModelStatic::InitFromFile() does this, without it IsLoaded()
 	// stays false after the first purge and the model gets reloaded on every lookup
@@ -1470,7 +1476,11 @@ idRenderModelTAN::IsDynamicModel
 =================
 */
 dynamicModel_t idRenderModelTAN::IsDynamicModel() const {
-	return DM_STATIC;
+	if ( tan == NULL || tan->numFrames <= 1 ) {
+		return DM_STATIC;
+	}
+
+	return DM_CACHED;
 }
 
 /*
@@ -1482,29 +1492,157 @@ const idJointQuat* idRenderModelTAN::GetDefaultPose(void) const {
 	return defaultPose.Ptr();
 }
 
-/*
-====================
-idRenderModelTAN::SetupTagPose
+void idRenderModelTAN::LerpMeshVertexes( srfTriangles_t* tri, const tanSurface_s* surf, float backlerp, int frame, int oldframe ) const {
+	const int numVerts = surf->numVerts;
 
-Stores the first frame tag positions as joint quats so the game side can read them
-====================
-*/
-void idRenderModelTAN::SetupTagPose() {
-	if ( tan == NULL || tan->numTags <= 0 ) {
+	const tanFrame_t* frames =
+		(const tanFrame_t*)((const byte*)tan + tan->ofsFrames);
+
+	const tanFrame_t& newFrame = frames[frame];
+	const tanFrame_t& oldFrame = frames[oldframe];
+
+	const tanXyzNormal_t* xyzBase =
+		(const tanXyzNormal_t*)((const byte*)surf +
+			surf->ofsXyzNormals);
+
+	const tanXyzNormal_t* newXyz =
+		xyzBase + frame * numVerts;
+
+	const tanXyzNormal_t* oldXyz =
+		xyzBase + oldframe * numVerts;
+
+	idDrawVert* out = tri->verts;
+
+	const float frontlerp = 1.0f - backlerp;
+
+	for ( int i = 0; i < numVerts; i++ ) {
+		idVec3 newPos;
+		idVec3 oldPos;
+
+		newPos.x =
+			newXyz[i].xyz[0] * newFrame.scale[0] +
+			newFrame.offset[0];
+
+		newPos.y =
+			newXyz[i].xyz[1] * newFrame.scale[1] +
+			newFrame.offset[1];
+
+		newPos.z =
+			newXyz[i].xyz[2] * newFrame.scale[2] +
+			newFrame.offset[2];
+
+		if ( backlerp > 0.0f ) {
+			oldPos.x =
+				oldXyz[i].xyz[0] * oldFrame.scale[0] +
+				oldFrame.offset[0];
+
+			oldPos.y =
+				oldXyz[i].xyz[1] * oldFrame.scale[1] +
+				oldFrame.offset[1];
+
+			oldPos.z =
+				oldXyz[i].xyz[2] * oldFrame.scale[2] +
+				oldFrame.offset[2];
+
+			out[i].xyz = oldPos * backlerp + newPos * frontlerp;
+		} else {
+			out[i].xyz = newPos;
+		}
+	}
+
+	tri->numVerts = numVerts;
+}
+
+void idRenderModelTAN::FillSurface( srfTriangles_t* tri, const tanSurface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe) const {
+	tri->deformedSurface = true;
+	tri->tangentsCalculated = false;
+	tri->facePlanesCalculated = false;
+
+	tri->numSilEdges = silInfo.numSilEdges;
+	tri->silEdges = silInfo.silEdges;
+	tri->silIndexes = silInfo.silIndexes;
+	tri->indexes = silInfo.indexes;
+	tri->numIndexes = silInfo.numIndexes;
+
+	tri->numVerts = 0;
+	tri->bounds.Clear();
+
+	LerpMeshVertexes(
+		tri,
+		surface,
+		backlerp,
+		frame,
+		oldframe
+	);
+
+	const tanSt_t* st =
+		(const tanSt_t*)((const byte*)surface + surface->ofsSt);
+
+	for (int i = 0; i < surface->numVerts; i++)
+	{
+		tri->verts[i].st[0] = st[i].st[0];
+		tri->verts[i].st[1] = st[i].st[1];
+	}
+
+	R_BoundTriSurf(tri);
+}
+
+void idRenderModelTAN::UpdateTagPose(
+	int frame,
+	int oldframe,
+	float backlerp)
+{
+	if (tan == NULL || tan->numTags <= 0)
+	{
 		return;
 	}
-	defaultPose.SetGranularity(1);
-	defaultPose.SetNum(tan->numTags);
 
-	for ( int i = 0; i < tan->numTags; i++ ) {
-		const tanTagData_t* data = (const tanTagData_t*)((const byte*)tan + tan->ofsTags[i] + sizeof(tanTagName_t));	// frame 0
+	frame = idMath::ClampInt(0, tan->numFrames - 1, frame);
+	oldframe = idMath::ClampInt(0, tan->numFrames - 1, oldframe);
+	backlerp = idMath::ClampFloat(0.0f, 1.0f, backlerp);
+
+	if (defaultPose.Num() != tan->numTags)
+	{
+		defaultPose.SetNum(tan->numTags);
+	}
+
+	const float frontlerp = 1.0f - backlerp;
+
+	for (int i = 0; i < tan->numTags; i++)
+	{
+		const tanTagName_t* tagName =
+			(const tanTagName_t*)((const byte*)tan + tan->ofsTags[i]);
+
+		const tanTagData_t* tagData =
+			(const tanTagData_t*)(tagName + 1);
+
+		const tanTagData_t& newTag = tagData[frame];
+		const tanTagData_t& oldTag = tagData[oldframe];
+
 		idJointQuat& pose = defaultPose[i];
 
-		pose.t.Set(data->origin[0], data->origin[1], data->origin[2]);
-		pose.q = idMat3(
-			idVec3(data->axis[0][0], data->axis[0][1], data->axis[0][2]),
-			idVec3(data->axis[1][0], data->axis[1][1], data->axis[1][2]),
-			idVec3(data->axis[2][0], data->axis[2][1], data->axis[2][2])).ToQuat();
+		idVec3 oldOrigin(
+			oldTag.origin[0],
+			oldTag.origin[1],
+			oldTag.origin[2]);
+
+		idVec3 newOrigin(
+			newTag.origin[0],
+			newTag.origin[1],
+			newTag.origin[2]);
+
+		idMat3 oldAxis(
+			idVec3(oldTag.axis[0][0], oldTag.axis[0][1], oldTag.axis[0][2]),
+			idVec3(oldTag.axis[1][0], oldTag.axis[1][1], oldTag.axis[1][2]),
+			idVec3(oldTag.axis[2][0], oldTag.axis[2][1], oldTag.axis[2][2]));
+
+		idMat3 newAxis(
+			idVec3(newTag.axis[0][0], newTag.axis[0][1], newTag.axis[0][2]),
+			idVec3(newTag.axis[1][0], newTag.axis[1][1], newTag.axis[1][2]),
+			idVec3(newTag.axis[2][0], newTag.axis[2][1], newTag.axis[2][2]));
+
+		pose.t.Lerp(oldOrigin, newOrigin, frontlerp);
+		pose.q.Slerp(oldAxis.ToQuat(), newAxis.ToQuat(), frontlerp);
 	}
 }
 
@@ -1549,7 +1687,7 @@ void idRenderModelTAN::CreateSurfaces() {
 		for ( int j = 0; j < surface->numVerts; j++ ) {
 			tri->verts[j].Clear();
 		}
-		R_TAN_DecodeFrame0(tri->verts, surface, frame0);
+		R_TAN_DecodeFrame(tri->verts, surface, frame0, 0);
 
 		const tanSt_t* st = (const tanSt_t*)((const byte*)surface + surface->ofsSt);
 		for ( int j = 0; j < surface->numVerts; j++ ) {
@@ -1569,6 +1707,197 @@ void idRenderModelTAN::CreateSurfaces() {
 
 		surface = next;
 	}
+}
+
+idRenderModel* idRenderModelTAN::InstantiateDynamicModel(
+	const renderEntity_s* ent,
+	const viewDef_s* view,
+	idRenderModel* cachedModel)
+{
+	if (tan == NULL)
+	{
+		if (cachedModel)
+		{
+			delete cachedModel;
+		}
+
+		return NULL;
+	}
+
+	if (tan->numFrames <= 1)
+	{
+		return this;
+	}
+
+	const int numFrames = tan->numFrames;
+
+	const int frame = idMath::ClampInt(
+		0,
+		numFrames - 1,
+		ent->shaderParms[SHADERPARM_MD3_FRAME]);
+
+	const int oldframe = idMath::ClampInt(
+		0,
+		numFrames - 1,
+		ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
+
+	const float backlerp = idMath::ClampFloat(
+		0.0f,
+		1.0f,
+		ent->shaderParms[SHADERPARM_MD3_BACKLERP]);
+
+	// Do not reuse another model type's snapshot.
+	if (cachedModel &&
+		idStr::Icmp(cachedModel->Name(), "_TAN_Snapshot_") != 0)
+	{
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	idRenderModelStatic* staticModel;
+
+	if (cachedModel)
+	{
+		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
+	}
+	else
+	{
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty("_TAN_Snapshot_");
+	}
+
+	staticModel->bounds.Clear();
+
+	// Update tag positions for the current animation frames.
+	UpdateTagPose(frame, oldframe, backlerp);
+
+	const tanSurface_t* surface =
+		(const tanSurface_t*)((const byte*)tan + tan->ofsSurfaces);
+
+	for (int i = 0; i < tan->numSurfaces; i++)
+	{
+		const silInfo_t& silInfo = silInfos[i];
+
+		if (silInfo.numIndexes <= 0 || surface->numVerts <= 0)
+		{
+			surface = (const tanSurface_t*)((const byte*)surface + surface->ofsEnd);
+			continue;
+		}
+
+		int surfaceNum;
+		modelSurface_t* modelSurf;
+
+		if (staticModel->FindSurfaceWithId(i, surfaceNum))
+		{
+			modelSurf = &staticModel->surfaces[surfaceNum];
+		}
+		else
+		{
+			modelSurface_t newSurf;
+			memset(&newSurf, 0, sizeof(newSurf));
+
+			newSurf.id = i;
+			staticModel->AddSurface(newSurf);
+
+			if (!staticModel->FindSurfaceWithId(i, surfaceNum))
+			{
+				common->Error(
+					"TAN snapshot: failed to find newly-added surface %d",
+					i);
+			}
+
+			modelSurf = &staticModel->surfaces[surfaceNum];
+		}
+
+		srfTriangles_t* tri = modelSurf->geometry;
+
+		if (tri &&
+			(tri->numVerts != surface->numVerts ||
+				tri->numIndexes != silInfo.numIndexes))
+		{
+			R_FreeStaticTriSurf(tri);
+			modelSurf->geometry = NULL;
+			tri = NULL;
+		}
+
+		if (!tri)
+		{
+			tri = R_AllocStaticTriSurf();
+			R_AllocStaticTriSurfVerts(tri, surface->numVerts);
+			modelSurf->geometry = tri;
+		}
+		else
+		{
+			R_FreeStaticTriSurfVertexCaches(tri);
+		}
+
+		modelSurf->shader = FindMaterialFor(surface);
+
+		FillSurface(
+			tri,
+			surface,
+			silInfo,
+			backlerp,
+			frame,
+			oldframe);
+
+		staticModel->bounds.AddPoint(tri->bounds[0]);
+		staticModel->bounds.AddPoint(tri->bounds[1]);
+
+		surface = (const tanSurface_t*)((const byte*)surface + surface->ofsEnd);
+	}
+
+	return staticModel;
+}
+
+idBounds idRenderModelTAN::Bounds( const renderEntity_s* ent ) const
+{
+	idBounds ret;
+	ret.Clear();
+
+	if (!ent || !tan) {
+		ret.AddPoint(idVec3(-10, -10, -10));
+		ret.AddPoint(idVec3(10, 10, 10));
+		return ret;
+	}
+
+	const tanFrame_t* frames =
+		(const tanFrame_t*)((const byte*)tan + tan->ofsFrames);
+
+	const int frame = idMath::ClampInt(
+		0,
+		tan->numFrames - 1,
+		ent->shaderParms[SHADERPARM_MD3_FRAME]);
+
+	const int oldframe = idMath::ClampInt(
+		0,
+		tan->numFrames - 1,
+		ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
+
+	ret.AddPoint(idVec3(
+		frames[frame].bounds[0][0],
+		frames[frame].bounds[0][1],
+		frames[frame].bounds[0][2]));
+
+	ret.AddPoint(idVec3(
+		frames[frame].bounds[1][0],
+		frames[frame].bounds[1][1],
+		frames[frame].bounds[1][2]));
+
+	if  (oldframe != frame &&
+		ent->shaderParms[SHADERPARM_MD3_BACKLERP] > 0.0f ) {
+		ret.AddPoint(idVec3(
+			frames[oldframe].bounds[0][0],
+			frames[oldframe].bounds[0][1],
+			frames[oldframe].bounds[0][2]));
+
+		ret.AddPoint(idVec3(
+			frames[oldframe].bounds[1][0],
+			frames[oldframe].bounds[1][1],
+			frames[oldframe].bounds[1][2]));
+	}
+
+	return ret;
 }
 
 /*
@@ -1619,7 +1948,7 @@ silInfo_t idRenderModelTAN::BuildSilInfo( tanSurface_t* surf ) {
 		verts[i].Clear();
 	}
 	// only .xyz is used by R_CreateSilIndexes() and R_IdentifySilEdges()
-	R_TAN_DecodeFrame0(verts, surf, (const tanFrame_t*)((const byte*)tan + tan->ofsFrames));
+	R_TAN_DecodeFrame( verts, surf, (const tanFrame_t*)((const byte*)tan + tan->ofsFrames), 0 );
 
 	srfTriangles_t tri;
 	memset(&tri, 0, sizeof(tri));
@@ -1641,7 +1970,8 @@ silInfo_t idRenderModelTAN::BuildSilInfo( tanSurface_t* surf ) {
 
 	R_CreateSilIndexes(&tri);	// allocates and sets tri.silIndexes
 	// static model, so coplanar edges can't become silhouette edges later
-	R_IdentifySilEdges(&tri, true);	// allocates and sets tri.silEdges
+	//R_IdentifySilEdges(&tri, true);	// allocates and sets tri.silEdges
+	R_IdentifySilEdges(&tri, tan->numFrames == 1);
 
 	ret.numIndexes = tri.numIndexes;
 	ret.numSilEdges = tri.numSilEdges;

@@ -316,6 +316,8 @@ public:
 
 	virtual void				InitFromFile(const char* fileName);
 	virtual dynamicModel_t		IsDynamicModel() const;
+	virtual idBounds			Bounds(const struct renderEntity_s* ent) const;
+	virtual idRenderModel*		InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
 	virtual const idJointQuat*	GetDefaultPose(void) const;
 	virtual jointHandle_t		GetJointHandle(const char* name) const;
 	virtual const char*			GetJointName(jointHandle_t handle) const;
@@ -336,11 +338,14 @@ private:
 
 	bool                        ParseTikiFile(const char* fileName);
 
+	void						LerpMeshVertexes(srfTriangles_t* tri, const tanSurface_s* surf, float backlerp, int frame, int oldframe) const;
+
 	void						FreeData();
 	void						CreateSurfaces();
-	void						SetupTagPose();
+	void						UpdateTagPose(int frame, int oldframe, float backlerp);
 	silInfo_t					BuildSilInfo(struct tanSurface_s* surf);
 	const idMaterial*			FindMaterialFor(const struct tanSurface_s* surface) const;
+	void						FillSurface( srfTriangles_t* tri, const tanSurface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe) const;
 };
 
 /*
