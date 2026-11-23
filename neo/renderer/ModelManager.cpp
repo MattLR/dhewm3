@@ -311,7 +311,7 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 			delete model;
 			return NULL;
 		} 
-	} else if (extension.Icmp("mdc") == 0) {
+	} else if ( extension.Icmp( "mdc" ) == 0 ) {
 		model = new idRenderModelMDC;
 		model->InitFromFile(modelName);
 		// DG: no idea why this needs special treatment, but otherwise
@@ -320,28 +320,31 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 			delete model;
 			return NULL;
 		}
-	} else if (extension.Icmp("tan") == 0) {
-			model = new idRenderModelTAN;
-			model->InitFromFile( modelName );
+	} else if ( extension.Icmp( "tan" ) == 0 )  {
+		model = new idRenderModelTAN;
+		model->InitFromFile(modelName);
+	} else if ( extension.Icmp( "tik" ) == 0 ) {
+		model = new idRenderModelTAN;
+		model->InitFromFile( modelName );
 	} else if ( extension.Icmp( "prt" ) == 0  ) {
 		model = new idRenderModelPrt;
 		model->InitFromFile( modelName );
-	} else if ( extension.Icmp( "liquid" ) == 0  ) {
+	} else if ( extension.Icmp( "liquid" ) == 0 ) {
 		model = new idRenderModelLiquid;
 		model->InitFromFile( modelName );
-	} else if (extension.Icmp("mdr") == 0) {
+	} else if ( extension.Icmp( "mdr" ) == 0 ) {
 		model = new rvmRenderModelMDR;
 		model->InitFromFile(modelName);
-	} else if (extension.Icmp("mds") == 0) {
+	} else if ( extension.Icmp("mds") == 0 ) {
 		model = new idRenderModelMDS;
 		model->InitFromFile(modelName);
-	} else if (extension.Icmp("mdm") == 0) {
+	} else if ( extension.Icmp("mdm") == 0 ) {
 		model = new idRenderModelMDM;
 		model->InitFromFile(modelName);
-	} else if (extension.Icmp("glm") == 0) {
+	} else if ( extension.Icmp( "glm" ) == 0 ) {
 		model = new idRenderModelMDX;
 		model->InitFromFile(modelName);
-	} else if (extension.Icmp("skb") == 0) {
+	} else if ( extension.Icmp( "skb" ) == 0 ) {
 		model = new idRenderModelSKB;
 		model->InitFromFile(modelName);
 	} else {

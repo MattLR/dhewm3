@@ -171,7 +171,7 @@ the per-tag offsets in the header are absolute (relative to the file start).
 #define MAX_TANPATH			64
 
 // vertex positions are 16 bit values scaled per frame:
-//   pos = value * frame.scale + frame.offset
+// pos = value * frame.scale + frame.offset
 
 typedef struct tanHeader_s {
 	int			ident;

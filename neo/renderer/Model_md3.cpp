@@ -30,6 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "framework/Session.h"
 #include "renderer/tr_local.h"
 #include "renderer/Model_local.h"
+#include "idlib/Lexer.h"
 
 #include "renderer/Model_md3.h"
 
@@ -852,7 +853,7 @@ const char *idRenderModelMD3::GetJointName( jointHandle_t handle ) const {
 	return ( tag + handle )->name;
 }
 
-//Testing Dynamix 
+// Testing Dynamix 
 
 /*
 =================
@@ -862,14 +863,14 @@ Checks that count elements of elemSize bytes starting at ofs fit inside limit.
 64 bit maths so hostile counts can't overflow.
 =================
 */
-static bool R_TAN_RangeOK(int ofs, long long count, int elemSize, int limit) {
-	if (count < 0) {
+static bool R_TAN_RangeOK( int ofs, long long count, int elemSize, int limit ) {
+	if ( count < 0 ) {
 		return false;
 	}
-	if (count == 0) {
+	if ( count == 0 ) {
 		return true;
 	}
-	if (ofs < 0) {
+	if ( ofs < 0 ) {
 		return false;
 	}
 	return ((long long)ofs + count * (long long)elemSize) <= (long long)limit;
@@ -881,7 +882,7 @@ R_TAN_SwapFloats
 =================
 */
 static void R_TAN_SwapFloats(float* f, int count) {
-	for (int i = 0; i < count; i++) {
+	for ( int i = 0; i < count; i++ ) {
 		f[i] = LittleFloat(f[i]);
 	}
 }
@@ -895,7 +896,7 @@ index before anything dereferences them.
 Returns false (after printing a warning) if the file can't be used.
 =================
 */
-static bool R_TAN_SwapAndValidate(tanHeader_t* tan, int size, const char* fileName) {
+static bool R_TAN_SwapAndValidate( tanHeader_t* tan, int size, const char* fileName ) {
 	int i, j;
 
 	LL(tan->ident);
@@ -907,51 +908,51 @@ static bool R_TAN_SwapAndValidate(tanHeader_t* tan, int size, const char* fileNa
 	R_TAN_SwapFloats(tan->totalDelta, 3);
 	LL(tan->ofsFrames);
 	LL(tan->ofsSurfaces);
-	for (i = 0; i < TAN_MAX_TAGS; i++) {
+	for ( i = 0; i < TAN_MAX_TAGS; i++ ) {
 		LL(tan->ofsTags[i]);
 	}
 	LL(tan->ofsEnd);
 	tan->name[MAX_TANPATH - 1] = 0;
 
-	if (tan->ident != TAN_IDENT) {
+	if ( tan->ident != TAN_IDENT ) {
 		common->Warning("InitFromFile: %s is not a TAN file (bad ident)", fileName);
 		return false;
 	}
-	if (tan->version != TAN_VERSION) {
+	if ( tan->version != TAN_VERSION ) {
 		common->Warning("InitFromFile: %s has wrong version (%i should be %i)", fileName, tan->version, TAN_VERSION);
 		return false;
 	}
-	if (tan->ofsEnd != size) {
+	if ( tan->ofsEnd != size ) {
 		common->Warning("InitFromFile: %s has a bad ofsEnd", fileName);
 		return false;
 	}
-	if (tan->numFrames < 1) {
+	if ( tan->numFrames < 1 ) {
 		common->Warning("InitFromFile: %s has no frames", fileName);
 		return false;
 	}
-	if (tan->numTags < 0 || tan->numTags > TAN_MAX_TAGS || tan->numSurfaces < 0) {
+	if ( tan->numTags < 0 || tan->numTags > TAN_MAX_TAGS || tan->numSurfaces < 0 ) {
 		common->Warning("InitFromFile: %s has a bad tag or surface count", fileName);
 		return false;
 	}
-	if (!R_TAN_RangeOK(tan->ofsFrames, tan->numFrames, sizeof(tanFrame_t), size)) {
+	if ( !R_TAN_RangeOK(tan->ofsFrames, tan->numFrames, sizeof(tanFrame_t), size) ) {
 		common->Warning("InitFromFile: %s has frame data outside the file", fileName);
 		return false;
 	}
 
-	if (tan->numFrames > 1) {
+	if ( tan->numFrames > 1 ) {
 		common->DWarning("%s has %i frames, only the first frame is loaded (static TAN loader)", fileName, tan->numFrames);
 	}
 
 	// swap all the frames
 	tanFrame_t* frame = (tanFrame_t*)((byte*)tan + tan->ofsFrames);
-	for (i = 0; i < tan->numFrames; i++, frame++) {
+	for ( i = 0; i < tan->numFrames; i++, frame++ ) {
 		R_TAN_SwapFloats((float*)frame, sizeof(tanFrame_t) / sizeof(float));
 	}
 
 	// swap all the tags: name, then numFrames * tag data
-	for (i = 0; i < tan->numTags; i++) {
-		if (!R_TAN_RangeOK(tan->ofsTags[i], 1, sizeof(tanTagName_t), size) ||
-			!R_TAN_RangeOK(tan->ofsTags[i] + (int)sizeof(tanTagName_t), tan->numFrames, sizeof(tanTagData_t), size)) {
+	for ( i = 0; i < tan->numTags; i++) {
+		if ( !R_TAN_RangeOK(tan->ofsTags[i], 1, sizeof(tanTagName_t), size) ||
+			!R_TAN_RangeOK(tan->ofsTags[i] + (int)sizeof(tanTagName_t), tan->numFrames, sizeof(tanTagData_t), size) ) {
 			common->Warning("InitFromFile: %s has tag %i outside the file", fileName, i);
 			return false;
 		}
@@ -959,15 +960,15 @@ static bool R_TAN_SwapAndValidate(tanHeader_t* tan, int size, const char* fileNa
 		tagName->name[MAX_TANPATH - 1] = 0;
 
 		tanTagData_t* tagData = (tanTagData_t*)(tagName + 1);
-		for (j = 0; j < tan->numFrames; j++, tagData++) {
+		for ( j = 0; j < tan->numFrames; j++, tagData++ ) {
 			R_TAN_SwapFloats((float*)tagData, sizeof(tanTagData_t) / sizeof(float));
 		}
 	}
 
 	// swap and validate all the surfaces
 	int surfOfs = tan->ofsSurfaces;
-	for (i = 0; i < tan->numSurfaces; i++) {
-		if (!R_TAN_RangeOK(surfOfs, 1, sizeof(tanSurface_t), size)) {
+	for ( i = 0; i < tan->numSurfaces; i++ ) {
+		if ( !R_TAN_RangeOK(surfOfs, 1, sizeof(tanSurface_t), size) ) {
 			common->Warning("InitFromFile: %s has surface %i outside the file", fileName, i);
 			return false;
 		}
@@ -986,28 +987,28 @@ static bool R_TAN_SwapAndValidate(tanHeader_t* tan, int size, const char* fileNa
 		LL(surf->ofsEnd);
 		surf->name[MAX_TANPATH - 1] = 0;
 
-		if (surf->ofsEnd < (int)sizeof(tanSurface_t) || !R_TAN_RangeOK(surfOfs, surf->ofsEnd, 1, size)) {
+		if ( surf->ofsEnd < (int)sizeof(tanSurface_t) || !R_TAN_RangeOK(surfOfs, surf->ofsEnd, 1, size) ) {
 			common->Warning("InitFromFile: %s has a bad ofsEnd in surface %i", fileName, i);
 			return false;
 		}
-		if (surf->numVerts < 0 || surf->numVerts > TAN_MAX_VERTS) {
+		if ( surf->numVerts < 0 || surf->numVerts > TAN_MAX_VERTS ) {
 			common->Warning("InitFromFile: %s has more than %i verts on a surface (%i)", fileName, TAN_MAX_VERTS, surf->numVerts);
 			return false;
 		}
-		if (surf->numTriangles < 0 || surf->numTriangles > TAN_MAX_TRIANGLES) {
+		if ( surf->numTriangles < 0 || surf->numTriangles > TAN_MAX_TRIANGLES ) {
 			common->Warning("InitFromFile: %s has more than %i triangles on a surface (%i)", fileName, TAN_MAX_TRIANGLES, surf->numTriangles);
 			return false;
 		}
-		if (surf->numFrames < 1) {
+		if ( surf->numFrames < 1 ) {
 			common->Warning("InitFromFile: %s surface %i has no frames", fileName, i);
 			return false;
 		}
 
 		const int end = surf->ofsEnd;
 		const long long nv = surf->numVerts;
-		if (!R_TAN_RangeOK(surf->ofsTriangles, surf->numTriangles, sizeof(tanTriangle_t), end) ||
+		if ( !R_TAN_RangeOK(surf->ofsTriangles, surf->numTriangles, sizeof(tanTriangle_t), end) ||
 			!R_TAN_RangeOK(surf->ofsSt, nv, sizeof(tanSt_t), end) ||
-			!R_TAN_RangeOK(surf->ofsXyzNormals, nv * surf->numFrames, sizeof(tanXyzNormal_t), end)) {
+			!R_TAN_RangeOK(surf->ofsXyzNormals, nv * surf->numFrames, sizeof(tanXyzNormal_t), end) ) {
 			common->Warning("InitFromFile: %s has surface %i data outside the surface", fileName, i);
 			return false;
 		}
@@ -1019,8 +1020,8 @@ static bool R_TAN_SwapAndValidate(tanHeader_t* tan, int size, const char* fileNa
 			LL(tri->indexes[0]);
 			LL(tri->indexes[1]);
 			LL(tri->indexes[2]);
-			for (int k = 0; k < 3; k++) {
-				if (tri->indexes[k] < 0 || tri->indexes[k] >= surf->numVerts) {
+			for ( int k = 0; k < 3; k++ ) {
+				if ( tri->indexes[k] < 0 || tri->indexes[k] >= surf->numVerts ) {
 					common->Warning("InitFromFile: %s has an out of range vertex index in surface %i", fileName, i);
 					return false;
 				}
@@ -1029,14 +1030,14 @@ static bool R_TAN_SwapAndValidate(tanHeader_t* tan, int size, const char* fileNa
 
 		// swap all the ST
 		tanSt_t* st = (tanSt_t*)((byte*)surf + surf->ofsSt);
-		for (j = 0; j < surf->numVerts; j++, st++) {
+		for ( j = 0; j < surf->numVerts; j++, st++ ) {
 			st->st[0] = LittleFloat(st->st[0]);
 			st->st[1] = LittleFloat(st->st[1]);
 		}
 
 		// swap the vertex positions (the packed normal is two plain bytes)
 		tanXyzNormal_t* xyz = (tanXyzNormal_t*)((byte*)surf + surf->ofsXyzNormals);
-		for (j = 0; j < surf->numVerts * surf->numFrames; j++, xyz++) {
+		for ( j = 0; j < surf->numVerts * surf->numFrames; j++, xyz++ ) {
 			xyz->xyz[0] = (unsigned short)LittleShort((short)xyz->xyz[0]);
 			xyz->xyz[1] = (unsigned short)LittleShort((short)xyz->xyz[1]);
 			xyz->xyz[2] = (unsigned short)LittleShort((short)xyz->xyz[2]);
@@ -1056,10 +1057,10 @@ Decodes the (first frame) vertex positions of a surface.
 Positions are value * scale + offset, using the model's first frame.
 =================
 */
-static void R_TAN_DecodeFrame0(idDrawVert* out, const tanSurface_t* surf, const tanFrame_t* frame0) {
-	const tanXyzNormal_t* xyz = (const tanXyzNormal_t*)((const byte*)surf + surf->ofsXyzNormals);
+static void R_TAN_DecodeFrame0( idDrawVert* out, const tanSurface_t* surf, const tanFrame_t* frame0) {
+	const tanXyzNormal_t* xyz = (const tanXyzNormal_t*)((const byte*)surf + surf->ofsXyzNormals );
 
-	for (int i = 0; i < surf->numVerts; i++, xyz++) {
+	for ( int i = 0; i < surf->numVerts; i++, xyz++ ) {
 		out[i].xyz.x = xyz->xyz[0] * frame0->scale[0] + frame0->offset[0];
 		out[i].xyz.y = xyz->xyz[1] * frame0->scale[1] + frame0->offset[1];
 		out[i].xyz.z = xyz->xyz[2] * frame0->scale[2] + frame0->offset[2];
@@ -1086,7 +1087,7 @@ void idRenderModelTAN::FreeData() {
 	srfTriangles_t tri;
 	memset(&tri, 0, sizeof(tri));
 
-	for (int i = 0, n = silInfos.Num(); i < n; ++i) {
+	for ( int i = 0, n = silInfos.Num(); i < n; ++i ) {
 		silInfo_t& silInfo = silInfos[i];
 		// Note: tri.sil* and tri.indexes were allocated by specialized allocators only
 		//       available in tr_trisurf.cpp, so they have to be freed with them as well.
@@ -1102,11 +1103,274 @@ void idRenderModelTAN::FreeData() {
 	shaders.Clear();
 	defaultPose.Clear();
 
-	if (tan != NULL) {
+	if ( tan != NULL ) {
 		Mem_Free(tan);
 		tan = NULL;
 	}
 	dataSize = 0;
+}
+
+static bool TIKI_ReadPathToken( idLexer& lexer, idStr& result )
+{
+	idToken token;
+
+	result.Clear();
+
+	if ( !lexer.ReadTokenOnLine(&token) ) {
+		return false;
+	}
+
+	result = token.c_str();
+
+	while ( lexer.ReadTokenOnLine(&token) ) {
+		result += token.c_str();
+	}
+
+	return true;
+}
+
+/*
+=========================
+idRenderModelTAN::ParseTikiFile
+
+Reads TIKI metadata:
+- Model path
+- Surface material assignments
+- Animation names and TAN filenames
+
+Does not perform animation processing.
+=========================
+*/
+bool idRenderModelTAN::ParseTikiFile( const char* fileName )
+{
+	idLexer lexer(LEXFL_NOFATALERRORS | LEXFL_ALLOWPATHNAMES);
+	idToken token;
+
+	// Clear any previous TIKI data.
+	tikiPath.Clear();
+	tikiMaterials.Clear();
+	tikiAnimations.Clear();
+
+	if ( !lexer.LoadFile(fileName) ) {
+		common->Warning("Couldn't load TIKI file '%s'", fileName);
+		return false;
+	}
+
+	while ( lexer.ReadToken(&token) ) {
+		// =========================================================
+		// SETUP BLOCK
+		// =========================================================
+		if ( token.Icmp("setup") == 0 ) {
+			if ( !lexer.ExpectTokenString("{") ) {
+				common->Warning(
+					"Expected '{' after setup in '%s'",
+					fileName
+				);
+				lexer.FreeSource();
+				return false;
+			}
+
+			while ( lexer.ReadToken(&token) )
+			{
+				if  ( token.Icmp("}") == 0 ) {
+					break;
+				}
+
+				// -------------------------------------------------
+				// MODEL DIRECTORY
+				// -------------------------------------------------
+				if ( token.Icmp("path") == 0 ) {
+					idToken pathToken;
+
+					if ( !lexer.ReadTokenOnLine(&pathToken) )
+					{
+						common->Warning(
+							"Missing path value in TIKI file '%s'",
+							fileName
+						);
+						continue;
+					}
+
+					tikiPath = pathToken.c_str();
+
+					// Remove any trailing slash so AppendPath()
+					// can join the directory and filename cleanly.
+					while ( tikiPath.Length() > 0 )
+					{
+						char lastChar =
+							tikiPath[tikiPath.Length() - 1];
+
+						if ( lastChar != '/' && lastChar != '\\' ) {
+							break;
+						}
+
+						tikiPath.StripTrailing('/');
+						tikiPath.StripTrailing('\\');
+					}
+
+					common->Printf(
+						"TIKI: setup path = '%s'\n",
+						tikiPath.c_str()
+					);
+				}
+
+				// -------------------------------------------------
+				// SURFACE MATERIAL OVERRIDES
+				// -------------------------------------------------
+				else if ( token.Icmp("surface") == 0 ) {
+					idToken surfaceName;
+					idToken shaderKeyword;
+					idStr shaderName;
+
+					if ( lexer.ReadTokenOnLine(&surfaceName) &&
+						lexer.ReadTokenOnLine(&shaderKeyword) &&
+						shaderKeyword.Icmp("shader") == 0 &&
+						TIKI_ReadPathToken(lexer, shaderName) )
+					{
+						// Replace hyphens with underscores.
+						for ( int i = 0; i < shaderName.Length(); i++ ) {
+							if ( shaderName[i] == '-' ) {
+								shaderName[i] = '_';
+							}
+						}
+
+						tikiMaterials.Set(
+							surfaceName.c_str(),
+							shaderName.c_str()
+						);
+
+						common->Printf(
+							"TIKI: surface='%s', shader='%s'\n",
+							surfaceName.c_str(),
+							shaderName.c_str()
+						);
+					}
+
+					lexer.SkipRestOfLine();
+				}
+
+				// -------------------------------------------------
+				// OTHER SETUP PROPERTIES
+				// -------------------------------------------------
+				else {
+					lexer.SkipRestOfLine();
+				}
+			}
+		}
+
+		// =========================================================
+		// ANIMATIONS BLOCK
+		// =========================================================
+		else if ( token.Icmp("animations") == 0 ) {
+			if ( !lexer.ExpectTokenString("{") ) {
+				common->Warning(
+					"Expected '{' after animations in '%s'",
+					fileName
+				);
+				lexer.FreeSource();
+				return false;
+			}
+
+			while ( lexer.ReadToken(&token) )
+			{
+				if ( token.Icmp("}") == 0 ) {
+					break;
+				}
+
+				// Animation name, e.g. idle, walk, run.
+				tikiAnimation_t animation;
+				animation.name = token.c_str();
+
+				idStr modelFile;
+
+				if ( !TIKI_ReadPathToken(lexer, modelFile) ) {
+					common->Warning(
+						"Missing model filename for animation '%s' in '%s'",
+						animation.name.c_str(),
+						fileName
+					);
+					continue;
+				}
+
+				// -------------------------------------------------
+				// RESOLVE MODEL FILE PATH
+				// -------------------------------------------------
+				//
+				// Example:
+				//
+				// tikiPath:
+				// models/item/armor_large_shield
+				//
+				// modelFile:
+				// armor_large_shield.tan
+				//
+				// result:
+				// models/item/armor_large_shield/armor_large_shield.tan
+				//
+				// -------------------------------------------------
+
+				if ( tikiPath.Length() > 0 ) {
+					animation.modelFile = tikiPath;
+					animation.modelFile.AppendPath(modelFile.c_str());
+				} else {
+					animation.modelFile = modelFile.c_str();
+				}
+
+				common->Printf(
+					"TIKI: animation='%s', directory='%s', "
+					"filename='%s', resolved='%s'\n",
+					animation.name.c_str(),
+					tikiPath.c_str(),
+					modelFile.c_str(),
+					animation.modelFile.c_str()
+				);
+
+				tikiAnimations.Append(animation);
+
+				// -------------------------------------------------
+				// OPTIONAL ANIMATION EVENT BLOCK
+				// -------------------------------------------------
+				//
+				// idle armor_large_shield.tan
+				// {
+				//     ...
+				// }
+				//
+				// -------------------------------------------------
+
+				if ( lexer.CheckTokenString("{") ) {
+					lexer.SkipBracedSection(false);
+				}
+			}
+		}
+
+		// =========================================================
+		// OTHER TOP-LEVEL BLOCKS
+		// =========================================================
+		else {
+			if ( lexer.CheckTokenString("{") ) {
+				lexer.SkipBracedSection(false);
+			} else {
+				lexer.SkipRestOfLine();
+			}
+		}
+	}
+
+	lexer.FreeSource();
+
+	// =============================================================
+	// VALIDATION
+	// =============================================================
+
+	if ( tikiAnimations.Num() == 0 ) {
+		common->Warning(
+			"No animations found in TIKI file '%s'",
+			fileName
+		);
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -1114,21 +1378,39 @@ void idRenderModelTAN::FreeData() {
 idRenderModelTAN::InitFromFile
 =================
 */
-void idRenderModelTAN::InitFromFile(const char* fileName) {
-	int					i;
+void idRenderModelTAN::InitFromFile( const char* fileName ) {
+	int i;
 	tanSurface_t* surf;
 	void* buffer = NULL;
-	int					size;
-	int					ofsEnd;
+	int size;
+	int ofsEnd;
 
-	// make reloading safe
 	FreeData();
 
 	name = fileName;
 
-	size = fileSystem->ReadFile(fileName, &buffer, NULL);
-	if (size <= (int)sizeof(tanHeader_t)) {
-		if (buffer != NULL) {
+	idStr extension;
+	idStr tanFileName = fileName;
+
+	tanFileName.ExtractFileExtension(extension);
+
+	// If we're loading a TIKI, parse it first.
+	if ( extension.Icmp("tik") == 0 ) {
+		if ( !ParseTikiFile(fileName) ) {
+			MakeDefaultModel();
+			return;
+		}
+
+		// For now, use the first animation's TAN file.
+		tanFileName = tikiAnimations[0].modelFile;
+
+		common->Printf( "TIKI model: %s\n", tanFileName.c_str() );
+	}
+
+		// Read the actual binary TAN file.
+	size = fileSystem->ReadFile( tanFileName.c_str(), &buffer, NULL );
+	if ( size <= (int)sizeof(tanHeader_t) ) {
+		if ( buffer != NULL ) {
 			fileSystem->FreeFile(buffer);
 		}
 		// must make it a default model so failure can be detected elsewhere
@@ -1139,7 +1421,7 @@ void idRenderModelTAN::InitFromFile(const char* fileName) {
 	// the header is validated properly in R_TAN_SwapAndValidate(), this only has
 	// to be good enough to size the copy without reading past the end of the file
 	ofsEnd = LittleInt(((tanHeader_t*)buffer)->ofsEnd);
-	if (ofsEnd < (int)sizeof(tanHeader_t) || ofsEnd > size) {
+	if ( ofsEnd < (int)sizeof(tanHeader_t) || ofsEnd > size ) {
 		common->Warning("InitFromFile: %s has a bad ofsEnd (%i, file is %i bytes)", fileName, ofsEnd, size);
 		fileSystem->FreeFile(buffer);
 		MakeDefaultModel();
@@ -1151,7 +1433,7 @@ void idRenderModelTAN::InitFromFile(const char* fileName) {
 	fileSystem->FreeFile(buffer);
 	dataSize = ofsEnd;
 
-	if (!R_TAN_SwapAndValidate(tan, ofsEnd, fileName)) {
+	if ( !R_TAN_SwapAndValidate(tan, ofsEnd, fileName) ) {
 		// don't keep a half swapped file around, the model is a default model now
 		FreeData();
 		MakeDefaultModel();
@@ -1160,10 +1442,10 @@ void idRenderModelTAN::InitFromFile(const char* fileName) {
 
 	// register the materials and build the shadow info for every surface
 	surf = (tanSurface_t*)((byte*)tan + tan->ofsSurfaces);
-	for (i = 0; i < tan->numSurfaces; i++) {
+	for ( i = 0; i < tan->numSurfaces; i++ ) {
 		// TAN surfaces only carry a surface name (the real shader assignment lives in the
 		// .tik script), so the surface name is used as the material name
-		const idMaterial* sh = declManager->FindMaterial(surf->name);
+		const idMaterial* sh = FindMaterialFor(surf);
 		shaders.AddUnique(sh);
 
 		silInfos.Append(BuildSilInfo(surf));
@@ -1208,13 +1490,13 @@ Stores the first frame tag positions as joint quats so the game side can read th
 ====================
 */
 void idRenderModelTAN::SetupTagPose() {
-	if (tan == NULL || tan->numTags <= 0) {
+	if ( tan == NULL || tan->numTags <= 0 ) {
 		return;
 	}
 	defaultPose.SetGranularity(1);
 	defaultPose.SetNum(tan->numTags);
 
-	for (int i = 0; i < tan->numTags; i++) {
+	for ( int i = 0; i < tan->numTags; i++ ) {
 		const tanTagData_t* data = (const tanTagData_t*)((const byte*)tan + tan->ofsTags[i] + sizeof(tanTagName_t));	// frame 0
 		idJointQuat& pose = defaultPose[i];
 
@@ -1239,13 +1521,13 @@ void idRenderModelTAN::CreateSurfaces() {
 	const tanFrame_t* frame0 = (const tanFrame_t*)((const byte*)tan + tan->ofsFrames);
 	const tanSurface_t* surface = (const tanSurface_t*)((const byte*)tan + tan->ofsSurfaces);
 
-	for (int i = 0; i < tan->numSurfaces; i++) {
+	for ( int i = 0; i < tan->numSurfaces; i++ ) {
 		const silInfo_t& silInfo = silInfos[i];
 
 		// find the next surface first, we may skip this one
 		const tanSurface_t* next = (const tanSurface_t*)((const byte*)surface + surface->ofsEnd);
 
-		if (silInfo.numIndexes <= 0 || surface->numVerts <= 0) {
+		if ( silInfo.numIndexes <= 0 || surface->numVerts <= 0 ) {
 			// nothing but degenerate triangles
 			surface = next;
 			continue;
@@ -1264,13 +1546,13 @@ void idRenderModelTAN::CreateSurfaces() {
 		tri->numIndexes = silInfo.numIndexes;
 		tri->numVerts = surface->numVerts;
 
-		for (int j = 0; j < surface->numVerts; j++) {
+		for ( int j = 0; j < surface->numVerts; j++ ) {
 			tri->verts[j].Clear();
 		}
 		R_TAN_DecodeFrame0(tri->verts, surface, frame0);
 
 		const tanSt_t* st = (const tanSt_t*)((const byte*)surface + surface->ofsSt);
-		for (int j = 0; j < surface->numVerts; j++) {
+		for ( int j = 0; j < surface->numVerts; j++ ) {
 			tri->verts[j].st[0] = st[j].st[0];
 			tri->verts[j].st[1] = st[j].st[1];
 		}
@@ -1294,8 +1576,11 @@ void idRenderModelTAN::CreateSurfaces() {
 idRenderModelTAN::FindMaterialFor
 =============
 */
-const idMaterial* idRenderModelTAN::FindMaterialFor(const tanSurface_t* surface) const {
-	return declManager->FindMaterial(surface->name);
+const idMaterial* idRenderModelTAN::FindMaterialFor( const tanSurface_t* surface ) const {
+
+	const char* shaderName = tikiMaterials.GetString(surface->name, surface->name);
+
+	return declManager->FindMaterial(shaderName);
 }
 
 /*
@@ -1306,11 +1591,11 @@ Builds the index list (without degenerate triangles) and the silhouette
 edge connectivity used for stencil shadows.  The result owns its index array.
 =====================
 */
-silInfo_t idRenderModelTAN::BuildSilInfo(tanSurface_t* surf) {
+silInfo_t idRenderModelTAN::BuildSilInfo( tanSurface_t* surf ) {
 	const int numVerts = surf->numVerts;
 	silInfo_t ret = { 0 };
 
-	if (numVerts <= 0 || surf->numTriangles <= 0) {
+	if ( numVerts <= 0 || surf->numTriangles <= 0 ) {
 		return ret;
 	}
 
@@ -1318,19 +1603,19 @@ silInfo_t idRenderModelTAN::BuildSilInfo(tanSurface_t* surf) {
 
 	// count the real triangles
 	int numGood = 0;
-	for (int i = 0; i < surf->numTriangles; i++) {
+	for ( int i = 0; i < surf->numTriangles; i++ ) {
 		const int* ix = tris[i].indexes;
-		if (ix[0] != ix[1] && ix[0] != ix[2] && ix[1] != ix[2]) {
+		if ( ix[0] != ix[1] && ix[0] != ix[2] && ix[1] != ix[2] ) {
 			numGood++;
 		}
 	}
-	if (numGood == 0) {
+	if ( numGood == 0 ) {
 		return ret;
 	}
 
 	bool onStack;
 	idDrawVert* verts = (idDrawVert*)Mem_MallocA(numVerts * sizeof(idDrawVert), onStack);
-	for (int i = 0; i < numVerts; ++i) {
+	for ( int i = 0; i < numVerts; ++i ) {
 		verts[i].Clear();
 	}
 	// only .xyz is used by R_CreateSilIndexes() and R_IdentifySilEdges()
@@ -1345,9 +1630,9 @@ silInfo_t idRenderModelTAN::BuildSilInfo(tanSurface_t* surf) {
 	R_AllocStaticTriSurfIndexes(&tri, tri.numIndexes);
 
 	int n = 0;
-	for (int i = 0; i < surf->numTriangles; i++) {
+	for ( int i = 0; i < surf->numTriangles; i++ ) {
 		const int* ix = tris[i].indexes;
-		if (ix[0] != ix[1] && ix[0] != ix[2] && ix[1] != ix[2]) {
+		if ( ix[0] != ix[1] && ix[0] != ix[2] && ix[1] != ix[2] ) {
 			tri.indexes[n++] = ix[0];
 			tri.indexes[n++] = ix[1];
 			tri.indexes[n++] = ix[2];
@@ -1374,14 +1659,14 @@ silInfo_t idRenderModelTAN::BuildSilInfo(tanSurface_t* surf) {
 idRenderModelTAN::GetJointHandle
 ====================
 */
-jointHandle_t idRenderModelTAN::GetJointHandle(const char* name) const {
-	if (tan == NULL) {
+jointHandle_t idRenderModelTAN::GetJointHandle( const char* name ) const {
+	if ( tan == NULL ) {
 		return INVALID_JOINT;
 	}
 
-	for (int i = 0; i < tan->numTags; i++) {
+	for ( int i = 0; i < tan->numTags; i++ ) {
 		const tanTagName_t* tagName = (const tanTagName_t*)((const byte*)tan + tan->ofsTags[i]);
-		if (idStr::Icmp(tagName->name, name) == 0) {
+		if ( idStr::Icmp(tagName->name, name) == 0 ) {
 			return (jointHandle_t)i;
 		}
 	}
@@ -1394,8 +1679,8 @@ jointHandle_t idRenderModelTAN::GetJointHandle(const char* name) const {
 idRenderModelTAN::GetJointName
 =====================
 */
-const char* idRenderModelTAN::GetJointName(jointHandle_t handle) const {
-	if (tan == NULL || handle < 0 || handle >= tan->numTags) {
+const char* idRenderModelTAN::GetJointName( jointHandle_t handle ) const {
+	if ( tan == NULL || handle < 0 || handle >= tan->numTags ) {
 		return "<invalid joint>";
 	}
 

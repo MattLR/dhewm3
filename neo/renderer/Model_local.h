@@ -304,6 +304,11 @@ private:
 struct tanHeader_s;
 struct tanSurface_s;
 
+struct tikiAnimation_t {
+	idStr name;
+	idStr modelFile;
+};
+
 class idRenderModelTAN : public idRenderModelStatic {
 public:
 	idRenderModelTAN();
@@ -323,6 +328,13 @@ private:
 	idList<silInfo_t>			silInfos;		// one per surface, own their indexes
 	idList<idJointQuat>			defaultPose;	// first frame tag poses for the game side
 	idList<const idMaterial*>	shaders;		// <-- keep whatever type your MD3 class uses for this
+
+	// TIKI metadata
+	idStr                       tikiPath;
+	idDict                      tikiMaterials;
+	idList<tikiAnimation_t>     tikiAnimations;
+
+	bool                        ParseTikiFile(const char* fileName);
 
 	void						FreeData();
 	void						CreateSurfaces();
