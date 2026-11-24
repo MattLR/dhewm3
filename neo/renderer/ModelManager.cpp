@@ -320,6 +320,12 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 			delete model;
 			return NULL;
 		}
+	} else if (extension.Icmp("md2") == 0) {
+		model = new idRenderModelMD2;
+		model->InitFromFile(modelName);
+	} else if (extension.Icmp("mdl") == 0) {
+		model = new idRenderModelMDL;
+		model->InitFromFile(modelName);
 	} else if ( extension.Icmp( "tan" ) == 0 )  {
 		model = new idRenderModelTAN;
 		model->InitFromFile(modelName);

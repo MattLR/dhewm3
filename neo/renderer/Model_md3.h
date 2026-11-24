@@ -261,4 +261,153 @@ typedef char tanCheckSurfaceSize[(sizeof(tanSurface_t) == 104) ? 1 : -1];
 typedef char tanCheckVertSize[(sizeof(tanXyzNormal_t) == 8) ? 1 : -1];
 typedef char tanCheckTagDataSize[(sizeof(tanTagData_t) == 48) ? 1 : -1];
 
+
+#define MD2_IDENT			(('2'<<24)+('P'<<16)+('D'<<8)+'I')	// "IDP2"
+#define MD2_VERSION			8
+
+// sanity limits (Quake 2 itself allows 2048 xyz / 4096 triangles)
+#define MD2_MAX_VERTS		4096	// xyz positions per frame
+#define MD2_MAX_ST			16384	// texture coordinates
+#define MD2_MAX_TRIANGLES	8192
+#define MD2_MAX_SKINS		32
+#define MD2_MAX_EXPANDED	65536	// unique (xyz, st) pairs after splitting
+#define MAX_MD2PATH			64
+
+typedef struct md2Header_s {
+	int			ident;
+	int			version;
+
+	int			skinWidth;
+	int			skinHeight;
+	int			frameSize;		// bytes per frame
+
+	int			numSkins;
+	int			numXyz;
+	int			numSt;
+	int			numTris;
+	int			numGlCmds;		// unused
+	int			numFrames;
+
+	int			ofsSkins;		// numSkins * md2Skin_t
+	int			ofsSt;			// numSt * md2St_t
+	int			ofsTris;		// numTris * md2Triangle_t
+	int			ofsFrames;		// numFrames * frameSize
+	int			ofsGlCmds;		// unused
+	int			ofsEnd;			// end of file
+} md2Header_t;
+
+typedef struct {
+	char		name[MAX_MD2PATH];
+} md2Skin_t;
+
+typedef struct {
+	short		s, t;			// in skin pixels, divide by skinWidth / skinHeight
+} md2St_t;
+
+typedef struct {
+	short		xyz[3];			// indexes into the frame's xyz list
+	short		st[3];			// indexes into the st list
+} md2Triangle_t;
+
+typedef struct {
+	unsigned char	v[3];		// pos = v * frame.scale + frame.translate
+	unsigned char	normalIndex;	// index into the Quake 2 normal table (unused, normals are derived)
+} md2Vertex_t;
+
+// followed by numXyz md2Vertex_t, the frame is header.frameSize bytes in total
+typedef struct md2Frame_s {
+	float		scale[3];
+	float		translate[3];
+	char		name[16];
+} md2Frame_t;
+
+typedef char md2CheckHeaderSize[(sizeof(md2Header_t) == 68) ? 1 : -1];
+typedef char md2CheckFrameSize[(sizeof(md2Frame_t) == 40) ? 1 : -1];
+typedef char md2CheckTriSize[(sizeof(md2Triangle_t) == 12) ? 1 : -1];
+typedef char md2CheckVertSize[(sizeof(md2Vertex_t) == 4) ? 1 : -1];
+
+
+/*
+========================================================================
+
+.MDL triangle model file format (Quake 1, "IDPO" version 6)
+
+Private structures used by the MDL loader.  Everything is little endian.
+This is NOT the Half-Life "IDST" .mdl format.
+
+File layout, in order (all of it variable length from the skins on, so
+nothing after the header is at a fixed offset and nothing is aligned):
+
+	mdlHeader_t
+	numSkins  * skin       int type (0 = single, 1 = group), then either
+							 skinWidth*skinHeight palette indexes, or
+							 int numSkins, float times[n], n * (w*h indexes)
+	numVerts  * mdlSt_t
+	numTris   * mdlTriangle_t
+	numFrames * frame      int type (0 = single, 1 = group), then either
+							 one simple frame, or
+							 int numFrames, trivertx bboxMin, bboxMax,
+							 float times[n], n * simple frame
+	simple frame:          trivertx bboxMin, bboxMax, char name[16],
+							 numVerts * trivertx
+
+========================================================================
+*/
+
+#define MDL_IDENT			(('O'<<24)+('P'<<16)+('D'<<8)+'I')	// "IDPO"
+#define MDL_IDENT_HL		(('T'<<24)+('S'<<16)+('D'<<8)+'I')	// "IDST", Half-Life, not supported
+#define MDL_VERSION			6
+
+// sanity limits (Quake 1 itself allows 2000 verts / 2048 triangles / 256 frames)
+#define MDL_MAX_VERTS		4096
+#define MDL_MAX_TRIANGLES	8192
+#define MDL_MAX_FRAMES		4096	// after flattening frame groups
+#define MDL_MAX_SKINS		256
+#define MDL_MAX_SKIN_SIZE	4096	// width / height
+#define MDL_MAX_GROUP		4096	// entries in one skin / frame group
+#define MDL_MAX_EXPANDED	65536	// unique (xyz, seam) pairs after splitting
+
+// 0 keeps the file's triangle order (same as MD2/MD3).  Set to 1 if models
+// render inside out in your tree.
+#define MDL_FLIP_WINDING	0
+
+typedef struct mdlHeader_s {
+	int			ident;
+	int			version;
+
+	float		scale[3];			// pos = v * scale + translate (global, not per frame)
+	float		translate[3];
+	float		boundingRadius;
+	float		eyePosition[3];
+
+	int			numSkins;
+	int			skinWidth;
+	int			skinHeight;
+	int			numVerts;
+	int			numTris;
+	int			numFrames;
+	int			syncType;
+	int			flags;
+	float		size;
+} mdlHeader_t;
+
+typedef struct {
+	int			onSeam;				// nonzero: back facing triangles use s + skinWidth/2
+	int			s, t;				// in skin pixels
+} mdlSt_t;
+
+typedef struct {
+	int			facesFront;			// zero: this triangle is a back face for texture seam purposes
+	int			vertex[3];
+} mdlTriangle_t;
+
+typedef struct {
+	unsigned char	v[3];
+	unsigned char	normalIndex;	// index into the Quake normal table (unused, normals are derived)
+} mdlVertex_t;
+
+typedef char mdlCheckHeaderSize[(sizeof(mdlHeader_t) == 84) ? 1 : -1];
+typedef char mdlCheckStSize[(sizeof(mdlSt_t) == 12) ? 1 : -1];
+typedef char mdlCheckTriSize[(sizeof(mdlTriangle_t) == 16) ? 1 : -1];
+typedef char mdlCheckVertSize[(sizeof(mdlVertex_t) == 4) ? 1 : -1];
 #endif /* !__MODEL_MD3_H__ */

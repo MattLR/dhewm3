@@ -348,6 +348,70 @@ private:
 	void						FillSurface( srfTriangles_t* tri, const tanSurface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe) const;
 };
 
+struct md2Header_s;
+
+class idRenderModelMD2 : public idRenderModelStatic {
+public:
+	idRenderModelMD2();
+	virtual						~idRenderModelMD2();
+
+	virtual void				InitFromFile(const char* fileName);
+	virtual dynamicModel_t		IsDynamicModel() const;
+	virtual idRenderModel* InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
+	virtual idBounds			Bounds(const struct renderEntity_s* ent) const;
+
+private:
+	int							dataSize;		// just for listing purposes
+	struct md2Header_s* md2;			// swapped file data, owned
+
+	idList<int>					vertXyz;		// split vertex -> xyz index in the frames
+	idList<float>				vertSt;			// 2 floats per split vertex
+	silInfo_t					silInfo;		// single surface, owns its indexes
+	const idMaterial* material;		// from the first skin, may be NULL
+	idList<idBounds>			frameBounds;	// MD2 frames don't store bounds
+
+	void						FreeData();
+	bool						BuildMesh(const char* fileName, idList<int>& indexes);
+	silInfo_t					BuildSilInfo(const idList<int>& indexes);
+	void						CreateSurfaces();
+	void						LerpMeshVertexes(srfTriangles_t* tri, const float backlerp, const int frame, const int oldframe) const;
+	void						FillSurface(srfTriangles_t* tri, float backlerp, int frame, int oldframe) const;
+};
+
+class idRenderModelMDL : public idRenderModelStatic {
+public:
+	idRenderModelMDL();
+	virtual						~idRenderModelMDL();
+
+	virtual void				InitFromFile(const char* fileName);
+	virtual dynamicModel_t		IsDynamicModel() const;
+	virtual idRenderModel* InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
+	virtual idBounds			Bounds(const struct renderEntity_s* ent) const;
+
+private:
+	int							dataSize;		// just for listing purposes
+	int							numXyz;			// positions per frame
+	int							numFrames;		// after flattening frame groups, 0 if loading failed
+	float						scale[3];		// global for all frames
+	float						translate[3];
+
+	idList<byte>				framePos;		// numFrames * numXyz * 3 position bytes
+	idList<int>					vertXyz;		// split vertex -> xyz index
+	idList<float>				vertSt;			// 2 floats per split vertex
+	silInfo_t					silInfo;		// single surface, owns its indexes
+	const idMaterial* material;		// named after the model, may be the default material
+	idList<idBounds>			frameBounds;
+
+	void						FreeData();
+	bool						Parse(const byte* data, int size, const char* fileName, idList<int>& stData, idList<int>& triData, int& skinWidth, int& skinHeight);
+	bool						BuildMesh(const char* fileName, const idList<int>& stData, const idList<int>& triData, int skinWidth, int skinHeight, idList<int>& indexes);
+	silInfo_t					BuildSilInfo(const idList<int>& indexes);
+	void						DecodeFrame(idVec3* out, int frame) const;
+	void						CreateSurfaces();
+	void						LerpMeshVertexes(srfTriangles_t* tri, const float backlerp, const int frame, const int oldframe) const;
+	void						FillSurface(srfTriangles_t* tri, float backlerp, int frame, int oldframe) const;
+};
+
 /*
 ===============================================================================
 

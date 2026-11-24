@@ -893,17 +893,6 @@ void idMD5Anim::CheckModelHierarchy( idRenderModel *model ) const {
 	int	jointNum;
 	int	parent;
 
-	//Dynamix - Add actual handling for this stuff later, need to add a type to rendermodel so I can check if it's md5 or not
-	if (1) {
-
-		for (i = 0; i < jointInfo.Num(); i++) {
-			jointNum = jointInfo[i].nameIndex;
-			idStr name = animationLib.JointName(jointNum);
-			parent = jointInfo[i].parentNum;
-			model->SetJoint(i, parent, name);
-		}
-	}
-
 	if ( jointInfo.Num() != model->NumJoints() ) {
 		gameLocal.Error( "CheckModelHierarchy: Model '%s' has different # of joints than anim '%s'", model->Name(), name.c_str() );
 	}

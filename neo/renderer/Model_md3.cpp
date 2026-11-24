@@ -1016,7 +1016,7 @@ static bool R_TAN_SwapAndValidate( tanHeader_t* tan, int size, const char* fileN
 
 		// swap and range check the triangles
 		tanTriangle_t* tri = (tanTriangle_t*)((byte*)surf + surf->ofsTriangles);
-		for (j = 0; j < surf->numTriangles; j++, tri++) {
+		for ( j = 0; j < surf->numTriangles; j++, tri++ ) {
 			LL(tri->indexes[0]);
 			LL(tri->indexes[1]);
 			LL(tri->indexes[2]);
@@ -1488,7 +1488,7 @@ dynamicModel_t idRenderModelTAN::IsDynamicModel() const {
 idRenderModelTAN::GetDefaultPose
 ====================
 */
-const idJointQuat* idRenderModelTAN::GetDefaultPose(void) const {
+const idJointQuat* idRenderModelTAN::GetDefaultPose( void ) const {
 	return defaultPose.Ptr();
 }
 
@@ -1553,7 +1553,7 @@ void idRenderModelTAN::LerpMeshVertexes( srfTriangles_t* tri, const tanSurface_s
 	tri->numVerts = numVerts;
 }
 
-void idRenderModelTAN::FillSurface( srfTriangles_t* tri, const tanSurface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe) const {
+void idRenderModelTAN::FillSurface( srfTriangles_t* tri, const tanSurface_s* surface, const silInfo_t& silInfo, float backlerp, int frame, int oldframe ) const {
 	tri->deformedSurface = true;
 	tri->tangentsCalculated = false;
 	tri->facePlanesCalculated = false;
@@ -1578,7 +1578,7 @@ void idRenderModelTAN::FillSurface( srfTriangles_t* tri, const tanSurface_s* sur
 	const tanSt_t* st =
 		(const tanSt_t*)((const byte*)surface + surface->ofsSt);
 
-	for (int i = 0; i < surface->numVerts; i++)
+	for ( int i = 0; i < surface->numVerts; i++ )
 	{
 		tri->verts[i].st[0] = st[i].st[0];
 		tri->verts[i].st[1] = st[i].st[1];
@@ -1587,13 +1587,9 @@ void idRenderModelTAN::FillSurface( srfTriangles_t* tri, const tanSurface_s* sur
 	R_BoundTriSurf(tri);
 }
 
-void idRenderModelTAN::UpdateTagPose(
-	int frame,
-	int oldframe,
-	float backlerp)
+void idRenderModelTAN::UpdateTagPose( int frame, int oldframe, float backlerp )
 {
-	if (tan == NULL || tan->numTags <= 0)
-	{
+	if ( tan == NULL || tan->numTags <= 0 ) {
 		return;
 	}
 
@@ -1601,15 +1597,13 @@ void idRenderModelTAN::UpdateTagPose(
 	oldframe = idMath::ClampInt(0, tan->numFrames - 1, oldframe);
 	backlerp = idMath::ClampFloat(0.0f, 1.0f, backlerp);
 
-	if (defaultPose.Num() != tan->numTags)
-	{
+	if ( defaultPose.Num() != tan->numTags ) {
 		defaultPose.SetNum(tan->numTags);
 	}
 
 	const float frontlerp = 1.0f - backlerp;
 
-	for (int i = 0; i < tan->numTags; i++)
-	{
+	for ( int i = 0; i < tan->numTags; i++ ) {
 		const tanTagName_t* tagName =
 			(const tanTagName_t*)((const byte*)tan + tan->ofsTags[i]);
 
@@ -1714,18 +1708,15 @@ idRenderModel* idRenderModelTAN::InstantiateDynamicModel(
 	const viewDef_s* view,
 	idRenderModel* cachedModel)
 {
-	if (tan == NULL)
-	{
-		if (cachedModel)
-		{
+	if ( tan == NULL ) {
+		if ( cachedModel ) {
 			delete cachedModel;
 		}
 
 		return NULL;
 	}
 
-	if (tan->numFrames <= 1)
-	{
+	if ( tan->numFrames <= 1 ) {
 		return this;
 	}
 
@@ -1747,21 +1738,17 @@ idRenderModel* idRenderModelTAN::InstantiateDynamicModel(
 		ent->shaderParms[SHADERPARM_MD3_BACKLERP]);
 
 	// Do not reuse another model type's snapshot.
-	if (cachedModel &&
-		idStr::Icmp(cachedModel->Name(), "_TAN_Snapshot_") != 0)
-	{
+	if ( cachedModel && idStr::Icmp(cachedModel->Name(), "_TAN_Snapshot_") != 0 ) {
 		delete cachedModel;
 		cachedModel = NULL;
 	}
 
 	idRenderModelStatic* staticModel;
 
-	if (cachedModel)
+	if ( cachedModel )
 	{
 		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
-	}
-	else
-	{
+	} else {
 		staticModel = new idRenderModelStatic;
 		staticModel->InitEmpty("_TAN_Snapshot_");
 	}
@@ -1774,11 +1761,11 @@ idRenderModel* idRenderModelTAN::InstantiateDynamicModel(
 	const tanSurface_t* surface =
 		(const tanSurface_t*)((const byte*)tan + tan->ofsSurfaces);
 
-	for (int i = 0; i < tan->numSurfaces; i++)
+	for ( int i = 0; i < tan->numSurfaces; i++ )
 	{
 		const silInfo_t& silInfo = silInfos[i];
 
-		if (silInfo.numIndexes <= 0 || surface->numVerts <= 0)
+		if ( silInfo.numIndexes <= 0 || surface->numVerts <= 0 )
 		{
 			surface = (const tanSurface_t*)((const byte*)surface + surface->ofsEnd);
 			continue;
@@ -1787,20 +1774,16 @@ idRenderModel* idRenderModelTAN::InstantiateDynamicModel(
 		int surfaceNum;
 		modelSurface_t* modelSurf;
 
-		if (staticModel->FindSurfaceWithId(i, surfaceNum))
-		{
+		if ( staticModel->FindSurfaceWithId(i, surfaceNum) ) {
 			modelSurf = &staticModel->surfaces[surfaceNum];
-		}
-		else
-		{
+		} else {
 			modelSurface_t newSurf;
 			memset(&newSurf, 0, sizeof(newSurf));
 
 			newSurf.id = i;
 			staticModel->AddSurface(newSurf);
 
-			if (!staticModel->FindSurfaceWithId(i, surfaceNum))
-			{
+			if ( !staticModel->FindSurfaceWithId(i, surfaceNum) ) {
 				common->Error(
 					"TAN snapshot: failed to find newly-added surface %d",
 					i);
@@ -1811,23 +1794,17 @@ idRenderModel* idRenderModelTAN::InstantiateDynamicModel(
 
 		srfTriangles_t* tri = modelSurf->geometry;
 
-		if (tri &&
-			(tri->numVerts != surface->numVerts ||
-				tri->numIndexes != silInfo.numIndexes))
-		{
+		if ( tri && (tri->numVerts != surface->numVerts || tri->numIndexes != silInfo.numIndexes) ) {
 			R_FreeStaticTriSurf(tri);
 			modelSurf->geometry = NULL;
 			tri = NULL;
 		}
 
-		if (!tri)
-		{
+		if ( !tri ) {
 			tri = R_AllocStaticTriSurf();
 			R_AllocStaticTriSurfVerts(tri, surface->numVerts);
 			modelSurf->geometry = tri;
-		}
-		else
-		{
+		} else {
 			R_FreeStaticTriSurfVertexCaches(tri);
 		}
 
@@ -1855,7 +1832,7 @@ idBounds idRenderModelTAN::Bounds( const renderEntity_s* ent ) const
 	idBounds ret;
 	ret.Clear();
 
-	if (!ent || !tan) {
+	if ( !ent || !tan ) {
 		ret.AddPoint(idVec3(-10, -10, -10));
 		ret.AddPoint(idVec3(10, 10, 10));
 		return ret;
@@ -1884,8 +1861,7 @@ idBounds idRenderModelTAN::Bounds( const renderEntity_s* ent ) const
 		frames[frame].bounds[1][1],
 		frames[frame].bounds[1][2]));
 
-	if  (oldframe != frame &&
-		ent->shaderParms[SHADERPARM_MD3_BACKLERP] > 0.0f ) {
+	if  ( oldframe != frame && ent->shaderParms[SHADERPARM_MD3_BACKLERP] > 0.0f ) {
 		ret.AddPoint(idVec3(
 			frames[oldframe].bounds[0][0],
 			frames[oldframe].bounds[0][1],
@@ -2015,4 +1991,1393 @@ const char* idRenderModelTAN::GetJointName( jointHandle_t handle ) const {
 	}
 
 	return ((const tanTagName_t*)((const byte*)tan + tan->ofsTags[handle]))->name;
+}
+
+static ID_INLINE const md2Frame_t* R_MD2_Frame( const md2Header_t* md2, int frame ) {
+	return (const md2Frame_t*)((const byte*)md2 + md2->ofsFrames + frame * md2->frameSize);
+}
+
+static ID_INLINE const md2Vertex_t* R_MD2_FrameVerts( const md2Frame_t* frame ) {
+	return (const md2Vertex_t*)(frame + 1);
+}
+
+/*
+=================
+R_MD2_RangeOK
+
+Checks that count elements of elemSize bytes starting at ofs fit inside limit.
+64 bit maths so hostile counts can't overflow.
+=================
+*/
+static bool R_MD2_RangeOK( int ofs, long long count, long long elemSize, int limit ) {
+	if ( count < 0 ) {
+		return false;
+	}
+	if ( count == 0 ) {
+		return true;
+	}
+	if ( ofs < 0 ) {
+		return false;
+	}
+	return ((long long)ofs + count * elemSize) <= (long long)limit;
+}
+
+/*
+=================
+R_MD2_SwapAndValidate
+
+Byte swaps the whole file in place and validates every offset, count and
+index before anything dereferences them.
+Returns false (after printing a warning) if the file can't be used.
+=================
+*/
+static bool R_MD2_SwapAndValidate( md2Header_t* md2, int size, const char* fileName ) {
+	int i, j;
+
+	// the header is 17 ints
+	int* hdr = (int*)md2;
+	for ( i = 0; i < (int)(sizeof(md2Header_t) / sizeof(int)); i++ ) {
+		LL(hdr[i]);
+	}
+
+	if ( md2->ident != MD2_IDENT ) {
+		common->Warning("InitFromFile: %s is not an MD2 file (bad ident)", fileName);
+		return false;
+	}
+	if ( md2->version != MD2_VERSION ) {
+		common->Warning("InitFromFile: %s has wrong version (%i should be %i)", fileName, md2->version, MD2_VERSION);
+		return false;
+	}
+	if ( md2->ofsEnd != size ) {
+		common->Warning("InitFromFile: %s has a bad ofsEnd", fileName);
+		return false;
+	}
+	if ( md2->numFrames < 1 ) {
+		common->Warning("InitFromFile: %s has no frames", fileName);
+		return false;
+	}
+	if ( md2->numXyz < 1 || md2->numXyz > MD2_MAX_VERTS ) {
+		common->Warning("InitFromFile: %s has a bad vertex count (%i, max %i)", fileName, md2->numXyz, MD2_MAX_VERTS);
+		return false;
+	}
+	if ( md2->numSt < 1 || md2->numSt > MD2_MAX_ST ) {
+		common->Warning("InitFromFile: %s has a bad texture coordinate count (%i, max %i)", fileName, md2->numSt, MD2_MAX_ST);
+		return false;
+	}
+	if ( md2->numTris < 1 || md2->numTris > MD2_MAX_TRIANGLES ) {
+		common->Warning("InitFromFile: %s has a bad triangle count (%i, max %i)", fileName, md2->numTris, MD2_MAX_TRIANGLES);
+		return false;
+	}
+	if ( md2->numSkins < 0 || md2->numSkins > MD2_MAX_SKINS ) {
+		common->Warning("InitFromFile: %s has a bad skin count (%i)", fileName, md2->numSkins);
+		return false;
+	}
+	if ( md2->skinWidth < 1 || md2->skinHeight < 1 ) {
+		common->Warning("InitFromFile: %s has a bad skin size", fileName);
+		return false;
+	}
+	if ( md2->frameSize < (int)sizeof(md2Frame_t) + md2->numXyz * (int)sizeof(md2Vertex_t) ) {
+		common->Warning("InitFromFile: %s has a frame size (%i) too small for %i vertexes", fileName, md2->frameSize, md2->numXyz);
+		return false;
+	}
+	if ( !R_MD2_RangeOK(md2->ofsSkins, md2->numSkins, sizeof(md2Skin_t), size) ||
+		!R_MD2_RangeOK(md2->ofsSt, md2->numSt, sizeof(md2St_t), size) ||
+		!R_MD2_RangeOK(md2->ofsTris, md2->numTris, sizeof(md2Triangle_t), size) ||
+		!R_MD2_RangeOK(md2->ofsFrames, md2->numFrames, md2->frameSize, size) ) {
+		common->Warning("InitFromFile: %s has data outside the file", fileName);
+		return false;
+	}
+
+	// skin names are plain chars, just make sure they terminate
+	md2Skin_t* skin = (md2Skin_t*)((byte*)md2 + md2->ofsSkins);
+	for ( i = 0; i < md2->numSkins; i++, skin++ ) {
+		skin->name[MAX_MD2PATH - 1] = 0;
+	}
+
+	// swap the texture coordinates
+	md2St_t* st = (md2St_t*)((byte*)md2 + md2->ofsSt);
+	for ( i = 0; i < md2->numSt; i++, st++ ) {
+		st->s = LittleShort(st->s);
+		st->t = LittleShort(st->t);
+	}
+
+	// swap and range check the triangles
+	md2Triangle_t* tri = (md2Triangle_t*)((byte*)md2 + md2->ofsTris);
+	for ( i = 0; i < md2->numTris; i++, tri++ ) {
+		for ( j = 0; j < 3; j++ ) {
+			tri->xyz[j] = LittleShort(tri->xyz[j]);
+			tri->st[j] = LittleShort(tri->st[j]);
+			if (tri->xyz[j] < 0 || tri->xyz[j] >= md2->numXyz || tri->st[j] < 0 || tri->st[j] >= md2->numSt) {
+				common->Warning("InitFromFile: %s has an out of range vertex or st index in triangle %i", fileName, i);
+				return false;
+			}
+		}
+	}
+
+	// swap the frame scale / translate (vertexes are bytes)
+	for ( i = 0; i < md2->numFrames; i++ ) {
+		md2Frame_t* frame = (md2Frame_t*)((byte*)md2 + md2->ofsFrames + i * md2->frameSize);
+		for ( j = 0; j < 3; j++ ) {
+			frame->scale[j] = LittleFloat(frame->scale[j]);
+			frame->translate[j] = LittleFloat(frame->translate[j]);
+		}
+		frame->name[15] = 0;
+	}
+
+	return true;
+}
+
+idRenderModelMD2::idRenderModelMD2() : dataSize(0), md2(NULL), material(NULL) {
+	memset(&silInfo, 0, sizeof(silInfo));
+}
+
+idRenderModelMD2::~idRenderModelMD2() {
+	FreeData();
+}
+
+/*
+=================
+idRenderModelMD2::FreeData
+
+Releases everything InitFromFile() allocated.  Called from the destructor and
+at the start of InitFromFile() so reloading doesn't leak.
+=================
+*/
+void idRenderModelMD2::FreeData() {
+	srfTriangles_t tri;
+	memset(&tri, 0, sizeof(tri));
+
+	// Note: tri.sil* and tri.indexes were allocated by specialized allocators only
+	//       available in tr_trisurf.cpp, so they have to be freed with them as well.
+	tri.silIndexes = silInfo.silIndexes;
+	tri.silEdges = silInfo.silEdges;
+	tri.indexes = silInfo.indexes;
+	R_FreeStaticTriSurfSilIndexes(&tri);
+	R_FreeStaticTriSurfSilEdges(&tri);
+	R_FreeStaticTriSurfIndexes(&tri);
+	memset(&silInfo, 0, sizeof(silInfo));
+
+	vertXyz.Clear();
+	vertSt.Clear();
+	frameBounds.Clear();
+	material = NULL;
+
+	if (md2 != NULL) {
+		Mem_Free(md2);
+		md2 = NULL;
+	}
+	dataSize = 0;
+}
+
+/*
+=================
+idRenderModelMD2::DecodeFrame
+
+Decodes the xyz positions of one frame (numXyz entries) into out
+=================
+*/
+static void R_MD2_DecodeFrame( idVec3* out, const md2Header_t* md2, int frameNum ) {
+	const md2Frame_t* frame = R_MD2_Frame(md2, frameNum);
+	const md2Vertex_t* v = R_MD2_FrameVerts(frame);
+
+	for ( int i = 0; i < md2->numXyz; i++, v++ ) {
+		out[i].x = v->v[0] * frame->scale[0] + frame->translate[0];
+		out[i].y = v->v[1] * frame->scale[1] + frame->translate[1];
+		out[i].z = v->v[2] * frame->scale[2] + frame->translate[2];
+	}
+}
+
+/*
+=================
+idRenderModelMD2::BuildMesh
+
+Splits the mesh into unique (xyz, st) vertices.  Fills vertXyz / vertSt and
+returns the triangle index list (degenerate triangles removed) in indexes.
+=================
+*/
+bool idRenderModelMD2::BuildMesh( const char* fileName, idList<int>& indexes ) {
+	const md2St_t* sts = (const md2St_t*)((const byte*)md2 + md2->ofsSt);
+	const md2Triangle_t* tris = (const md2Triangle_t*)((const byte*)md2 + md2->ofsTris);
+
+	idList<int> vertStIndex;	// st index of each split vertex
+	idList<int> next;			// next split vertex with the same xyz
+	int* head = (int*)Mem_Alloc(md2->numXyz * sizeof(int));	// first split vertex for each xyz
+	for ( int i = 0; i < md2->numXyz; i++ ) {
+		head[i] = -1;
+	}
+
+	indexes.Clear();
+	vertXyz.Clear();
+
+	for ( int t = 0; t < md2->numTris; t++ ) {
+		int corner[3];
+
+		for ( int c = 0; c < 3; c++ ) {
+			const int xi = tris[t].xyz[c];
+			const int si = tris[t].st[c];
+
+			int e = head[xi];
+			while ( e >= 0 && vertStIndex[e] != si ) {
+				e = next[e];
+			}
+			if ( e < 0 ) {
+				e = vertXyz.Num();
+				if ( e >= MD2_MAX_EXPANDED ) {
+					common->Warning("InitFromFile: %s has more than %i unique vertexes", fileName, MD2_MAX_EXPANDED);
+					Mem_Free(head);
+					return false;
+				}
+				vertXyz.Append(xi);
+				vertStIndex.Append(si);
+				next.Append(head[xi]);
+				head[xi] = e;
+			}
+			corner[c] = e;
+		}
+
+		// drop degenerate triangles
+		if ( corner[0] == corner[1] || corner[0] == corner[2] || corner[1] == corner[2] ) {
+			continue;
+		}
+		// same order as MD3 (and Quake 2), no winding flip needed
+		indexes.Append(corner[0]);
+		indexes.Append(corner[1]);
+		indexes.Append(corner[2]);
+	}
+	Mem_Free(head);
+
+	if ( indexes.Num() == 0 ) {
+		common->Warning("InitFromFile: %s has only degenerate triangles", fileName);
+		return false;
+	}
+
+	// texture coordinates, frame invariant
+	const float invW = 1.0f / (float)md2->skinWidth;
+	const float invH = 1.0f / (float)md2->skinHeight;
+	vertSt.SetNum(vertXyz.Num() * 2);
+	for ( int i = 0; i < vertXyz.Num(); i++ ) {
+		vertSt[i * 2 + 0] = sts[vertStIndex[i]].s * invW;
+		vertSt[i * 2 + 1] = sts[vertStIndex[i]].t * invH;
+	}
+
+	return true;
+}
+
+/*
+=================
+idRenderModelMD2::InitFromFile
+=================
+*/
+void idRenderModelMD2::InitFromFile( const char* fileName ) {
+	void* buffer = NULL;
+	int					size;
+	int					ofsEnd;
+	idList<int>			indexes;
+
+	// make reloading safe
+	FreeData();
+
+	name = fileName;
+
+	size = fileSystem->ReadFile(fileName, &buffer, NULL);
+	if ( size <= (int)sizeof(md2Header_t) ) {
+		if ( buffer != NULL ) {
+			fileSystem->FreeFile(buffer);
+		}
+		// must make it a default model so failure can be detected elsewhere
+		MakeDefaultModel();
+		return;
+	}
+
+	// the header is validated properly in R_MD2_SwapAndValidate(), this only has
+	// to be good enough to size the copy without reading past the end of the file
+	ofsEnd = LittleInt(((md2Header_t*)buffer)->ofsEnd);
+	if ( ofsEnd < (int)sizeof(md2Header_t) || ofsEnd > size ) {
+		common->Warning("InitFromFile: %s has a bad ofsEnd (%i, file is %i bytes)", fileName, ofsEnd, size);
+		fileSystem->FreeFile(buffer);
+		MakeDefaultModel();
+		return;
+	}
+
+	md2 = (md2Header_t*)Mem_Alloc(ofsEnd);
+	memcpy(md2, buffer, ofsEnd);
+	fileSystem->FreeFile(buffer);
+	dataSize = ofsEnd;
+
+	if ( !R_MD2_SwapAndValidate(md2, ofsEnd, fileName) || !BuildMesh(fileName, indexes) ) {
+		// don't keep a half swapped file around, the model is a default model now
+		FreeData();
+		MakeDefaultModel();
+		return;
+	}
+
+	// The first skin is used as the material.  MD2 skins are image paths like
+	// "players/male/grunt.pcx", so the extension is dropped to get a material name.
+	// Models without a skin get no material and expect a skin / material override.
+	if ( md2->numSkins > 0 ) {
+		const md2Skin_t* skin = (const md2Skin_t*)((const byte*)md2 + md2->ofsSkins);
+		idStr matName = skin->name;
+		matName.StripFileExtension();
+		material = declManager->FindMaterial(matName.c_str());
+	}
+
+	// per frame bounds, MD2 frames don't store any
+	idList<idVec3> positions;
+	positions.SetNum(md2->numXyz);
+	frameBounds.SetNum(md2->numFrames);
+	for ( int f = 0; f < md2->numFrames; f++ ) {
+		R_MD2_DecodeFrame(positions.Ptr(), md2, f);
+		frameBounds[f].Clear();
+		for ( int i = 0; i < md2->numXyz; i++ ) {
+			frameBounds[f].AddPoint(positions[i]);
+		}
+	}
+
+	silInfo = BuildSilInfo(indexes);
+
+	// If this is only one frame generate the static model information to fix
+	// loading issues and allow physics generation (same as the MD3 loader)
+	if (md2->numFrames == 1) {
+		CreateSurfaces();
+	}
+
+	// idRenderModelStatic::InitFromFile() does this, without it IsLoaded()
+	// stays false after the first purge and the model gets reloaded on every lookup
+	purged = false;
+}
+
+/*
+=================
+idRenderModelMD2::IsDynamicModel
+=================
+*/
+dynamicModel_t idRenderModelMD2::IsDynamicModel() const {
+	// md2 is NULL if loading failed and this is a default model now
+	if ( md2 == NULL || md2->numFrames == 1 ) {
+		return DM_STATIC;
+	}
+	return DM_CACHED;
+}
+
+/*
+=================
+idRenderModelMD2::LerpMeshVertexes
+
+Appends the split vertexes for frame / oldframe to tri->verts
+=================
+*/
+void idRenderModelMD2::LerpMeshVertexes( srfTriangles_t* tri, const float backlerp, const int frame, const int oldframe ) const {
+	const int numSplit = vertXyz.Num();
+	const md2Frame_t* newFrame = R_MD2_Frame(md2, frame);
+	const md2Vertex_t* newVerts = R_MD2_FrameVerts(newFrame);
+
+	idDrawVert* out = tri->verts + tri->numVerts;
+
+	if ( backlerp == 0 ) {
+		//
+		// just copy the vertexes
+		//
+		for ( int v = 0; v < numSplit; v++, out++ ) {
+			const md2Vertex_t& nv = newVerts[vertXyz[v]];
+			out->xyz.x = nv.v[0] * newFrame->scale[0] + newFrame->translate[0];
+			out->xyz.y = nv.v[1] * newFrame->scale[1] + newFrame->translate[1];
+			out->xyz.z = nv.v[2] * newFrame->scale[2] + newFrame->translate[2];
+		}
+	} else {
+		//
+		// interpolate and copy the vertexes
+		//
+		const md2Frame_t* oldFrame = R_MD2_Frame(md2, oldframe);
+		const md2Vertex_t* oldVerts = R_MD2_FrameVerts(oldFrame);
+		const float frontlerp = 1.0f - backlerp;
+
+		for ( int v = 0; v < numSplit; v++, out++ ) {
+			const md2Vertex_t& nv = newVerts[vertXyz[v]];
+			const md2Vertex_t& ov = oldVerts[vertXyz[v]];
+			for ( int k = 0; k < 3; k++ ) {
+				const float newPos = nv.v[k] * newFrame->scale[k] + newFrame->translate[k];
+				const float oldPos = ov.v[k] * oldFrame->scale[k] + oldFrame->translate[k];
+				out->xyz[k] = oldPos * backlerp + newPos * frontlerp;
+			}
+		}
+	}
+
+	tri->numVerts += numSplit;
+}
+
+/*
+=================
+idRenderModelMD2::FillSurface
+
+Fills an allocated (or reused) surface with the geometry for one frame.
+Shared by CreateSurfaces() and InstantiateDynamicModel().
+tri->verts must already be allocated for vertXyz.Num() verts.
+=================
+*/
+void idRenderModelMD2::FillSurface( srfTriangles_t* tri, float backlerp, int frame, int oldframe ) const {
+	// These flags and references must be (re)set after allocation or reuse.
+	// deformedSurface prevents silEdges, silIndexes, indexes (and more not used here)
+	// from being freed (they belong to silInfo which is freed in FreeData())
+	tri->deformedSurface = true;
+	tri->tangentsCalculated = false;
+	tri->facePlanesCalculated = false;
+	tri->numSilEdges = silInfo.numSilEdges;
+	tri->silEdges = silInfo.silEdges;
+	tri->silIndexes = silInfo.silIndexes;
+	tri->indexes = silInfo.indexes;
+	tri->numIndexes = silInfo.numIndexes;
+
+	// LerpMeshVertexes appends at tri->numVerts, so reset the logical
+	// vertex count while keeping the allocated vertex buffer.
+	tri->numVerts = 0;
+	tri->bounds.Clear();
+
+	LerpMeshVertexes(tri, backlerp, frame, oldframe);
+
+	// Texture coordinates are frame-invariant.  Reassigning them is cheap
+	// and also initialises newly allocated vertex buffers.
+	for ( int j = 0; j < vertXyz.Num(); j++ ) {
+		idDrawVert* stri = &tri->verts[j];
+		stri->st[0] = vertSt[j * 2 + 0];
+		stri->st[1] = vertSt[j * 2 + 1];
+	}
+
+	R_BoundTriSurf(tri);
+}
+
+/*
+=============
+idRenderModelMD2::CreateSurfaces
+
+Single frame models get real static surfaces (needed for physics / collision
+model generation).
+=============
+*/
+void idRenderModelMD2::CreateSurfaces() {
+	this->bounds.Clear();
+
+	srfTriangles_t* tri = R_AllocStaticTriSurf();
+	R_AllocStaticTriSurfVerts(tri, vertXyz.Num());
+
+	FillSurface(tri, 0.0f, 0, 0);
+
+	modelSurface_t surf;
+	surf.geometry = tri;
+	surf.shader = material;
+	surf.id = this->NumSurfaces();
+	this->AddSurface(surf);
+	this->bounds.AddPoint(tri->bounds[0]);
+	this->bounds.AddPoint(tri->bounds[1]);
+}
+
+/*
+=============
+idRenderModelMD2::InstantiateDynamicModel
+
+The per-entity snapshot (and the vertex allocation inside it) is kept between
+calls and only the animated vertex positions are rewritten.  The topology
+(indexes, sil edges) is shared with silInfo and never touched.
+Frame, last frame and backlerp come from the same shaderParms as the MD3 loader.
+=============
+*/
+idRenderModel* idRenderModelMD2::InstantiateDynamicModel( const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel ) {
+	int				surfaceNum;
+	int				frame, oldframe;
+	float			backlerp;
+	idRenderModelStatic* staticModel;
+
+	if ( md2 == NULL ) {
+		// failed to load, we are a default model and shouldn't get here
+		if ( cachedModel ) {
+			delete cachedModel;
+		}
+		return NULL;
+	}
+
+	const int numFrames = md2->numFrames;
+
+	frame = idMath::ClampInt(0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME]);
+	oldframe = idMath::ClampInt(0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
+	backlerp = idMath::ClampFloat(0.0f, 1.0f, ent->shaderParms[SHADERPARM_MD3_BACKLERP]);
+
+	if ( cachedModel && !r_useCachedDynamicModels.GetBool() ) {
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	// Do not accept snapshots generated by another model type
+	if ( cachedModel && idStr::Icmp(cachedModel->Name(), "_MD2_Snapshot_") != 0 ) {
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	if ( cachedModel ) {
+		assert(dynamic_cast<idRenderModelStatic*>(cachedModel) != NULL);
+		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
+	} else {
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty("_MD2_Snapshot_");
+	}
+
+	staticModel->bounds.Clear();
+
+	// Surface IDs are stable for the lifetime of this model.  Keep the
+	// modelSurface_t and its vertex allocation in the per-entity snapshot.
+	modelSurface_t* surf;
+	if ( staticModel->FindSurfaceWithId(0, surfaceNum) ) {
+		surf = &staticModel->surfaces[surfaceNum];
+	} else {
+		modelSurface_t newSurf;
+		memset(&newSurf, 0, sizeof(newSurf));
+		newSurf.id = 0;
+		staticModel->AddSurface(newSurf);
+		if ( !staticModel->FindSurfaceWithId(0, surfaceNum) ) {
+			common->Error("MD2 snapshot: failed to find newly-added surface");
+		}
+		surf = &staticModel->surfaces[surfaceNum];
+	}
+
+	// The vertex and index counts determine whether the existing triangle
+	// allocation can be reused.  The topology arrays are owned by this
+	// model's silInfo, not by the snapshot.
+	srfTriangles_t* tri = surf->geometry;
+	if ( tri && (tri->numVerts != vertXyz.Num() || tri->numIndexes != silInfo.numIndexes) ) {
+		R_FreeStaticTriSurf(tri);
+		surf->geometry = NULL;
+		tri = NULL;
+	}
+	if ( !tri ) {
+		tri = R_AllocStaticTriSurf();
+		R_AllocStaticTriSurfVerts(tri, vertXyz.Num());
+		surf->geometry = tri;
+	} else {
+		// Vertex positions are about to change.  Drop any cached GPU
+		// copy (ambient, shadow and index caches) while retaining the
+		// CPU-side vertex allocation.
+		R_FreeStaticTriSurfVertexCaches(tri);
+	}
+
+	surf->shader = material;
+
+	FillSurface(tri, backlerp, frame, oldframe);
+
+	staticModel->bounds.AddPoint(tri->bounds[0]);
+	staticModel->bounds.AddPoint(tri->bounds[1]);
+
+	return staticModel;
+}
+
+/*
+=====================
+idRenderModelMD2::Bounds
+=====================
+*/
+idBounds idRenderModelMD2::Bounds( const struct renderEntity_s* ent ) const {
+	idBounds		ret;
+
+	ret.Clear();
+
+	if ( !ent || !md2 || frameBounds.Num() == 0 ) {
+		// just give it the editor bounds
+		ret.AddPoint(idVec3(-10, -10, -10));
+		ret.AddPoint(idVec3(10, 10, 10));
+		return ret;
+	}
+
+	const int frameNum = idMath::ClampInt(0, md2->numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME]);
+	const int oldFrameNum = idMath::ClampInt(0, md2->numFrames - 1, ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
+
+	ret = frameBounds[frameNum];
+
+	// while interpolating the mesh is a blend of both frames
+	if ( oldFrameNum != frameNum && ent->shaderParms[SHADERPARM_MD3_BACKLERP] > 0.0f ) {
+		ret.AddBounds(frameBounds[oldFrameNum]);
+	}
+
+	return ret;
+}
+
+/*
+=====================
+idRenderModelMD2::BuildSilInfo
+
+Builds the silhouette edge connectivity used for stencil shadows.  The result
+owns its own copy of the index list.
+=====================
+*/
+silInfo_t idRenderModelMD2::BuildSilInfo( const idList<int>& indexes ) {
+	const int numSplit = vertXyz.Num();
+	silInfo_t ret = { 0 };
+
+	// positions of frame 0, expanded to the split vertexes.  Only .xyz is used by
+	// R_CreateSilIndexes() and R_IdentifySilEdges().
+	idList<idVec3> positions;
+	positions.SetNum(md2->numXyz);
+	R_MD2_DecodeFrame(positions.Ptr(), md2, 0);
+
+	bool onStack;
+	idDrawVert* verts = (idDrawVert*)Mem_MallocA(numSplit * sizeof(idDrawVert), onStack);
+	for ( int i = 0; i < numSplit; ++i ) {
+		verts[i].Clear();
+		verts[i].xyz = positions[vertXyz[i]];
+	}
+
+	srfTriangles_t tri;
+	memset(&tri, 0, sizeof(tri));
+
+	tri.verts = verts;
+	tri.numVerts = numSplit;
+	tri.numIndexes = indexes.Num();
+	R_AllocStaticTriSurfIndexes(&tri, tri.numIndexes);
+	for ( int i = 0; i < tri.numIndexes; i++ ) {
+		tri.indexes[i] = indexes[i];
+	}
+
+	R_CreateSilIndexes(&tri);	// allocates and sets tri.silIndexes
+	// if there's only one frame (no animation), the omitCoplanarEdges optimization can be used
+	// (otherwise it can't because edges that are coplanar in frame 0 may not be in another frame)
+	R_IdentifySilEdges(&tri, md2->numFrames == 1);	// allocates and sets tri.silEdges
+
+	ret.numIndexes = tri.numIndexes;
+	ret.numSilEdges = tri.numSilEdges;
+	ret.indexes = tri.indexes;
+	ret.silIndexes = tri.silIndexes;
+	ret.silEdges = tri.silEdges;
+
+	Mem_FreeA(verts, onStack);
+
+	return ret;
+}
+
+/*
+=================
+mdlReader
+
+Bounds checked sequential reader over the raw file
+=================
+*/
+struct mdlReader_t {
+	const byte* data;
+	int				size;
+	int				pos;
+	bool			ok;
+
+	mdlReader_t(const byte* d, int s) : data(d), size(s), pos(0), ok(true) {}
+
+	bool Skip(long long n) {
+		if ( !ok || n < 0 || (long long)pos + n >(long long)size ) {
+			ok = false;
+			return false;
+		}
+		pos += (int)n;
+		return true;
+	}
+	const byte* Take(long long n) {
+		const int start = pos;
+		return Skip(n) ? data + start : NULL;
+	}
+	int ReadInt() {
+		const byte* p = Take(4);
+		if ( p == NULL ) {
+			return 0;
+		}
+		int v;
+		memcpy(&v, p, 4);	// the file is unaligned, don't cast
+		return LittleInt(v);
+	}
+};
+
+/*
+=================
+idRenderModelMDL::idRenderModelMDL
+=================
+*/
+idRenderModelMDL::idRenderModelMDL() : dataSize(0), numXyz(0), numFrames(0), material(NULL) {
+	memset(&silInfo, 0, sizeof(silInfo));
+	scale[0] = scale[1] = scale[2] = 1.0f;
+	translate[0] = translate[1] = translate[2] = 0.0f;
+}
+
+idRenderModelMDL::~idRenderModelMDL() {
+	FreeData();
+}
+
+/*
+=================
+idRenderModelMDL::FreeData
+
+Releases everything InitFromFile() allocated.  Called from the destructor and
+at the start of InitFromFile() so reloading doesn't leak.
+=================
+*/
+void idRenderModelMDL::FreeData() {
+	srfTriangles_t tri;
+	memset(&tri, 0, sizeof(tri));
+
+	// Note: tri.sil* and tri.indexes were allocated by specialized allocators only
+	//       available in tr_trisurf.cpp, so they have to be freed with them as well.
+	tri.silIndexes = silInfo.silIndexes;
+	tri.silEdges = silInfo.silEdges;
+	tri.indexes = silInfo.indexes;
+	R_FreeStaticTriSurfSilIndexes(&tri);
+	R_FreeStaticTriSurfSilEdges(&tri);
+	R_FreeStaticTriSurfIndexes(&tri);
+	memset(&silInfo, 0, sizeof(silInfo));
+
+	framePos.Clear();
+	vertXyz.Clear();
+	vertSt.Clear();
+	frameBounds.Clear();
+	material = NULL;
+	numXyz = 0;
+	numFrames = 0;
+	dataSize = 0;
+}
+
+/*
+=================
+idRenderModelMDL::Parse
+
+Reads the whole file into framePos / scale / translate and returns the raw
+texture coordinate and triangle tables for BuildMesh().
+Returns false (after printing a warning) if the file can't be used.
+=================
+*/
+bool idRenderModelMDL::Parse( const byte* data, int size, const char* fileName, idList<int>& stData, idList<int>& triData, int& skinWidth, int& skinHeight ) {
+	mdlReader_t r(data, size);
+	mdlHeader_t h;
+	int i, j;
+
+	const byte* p = r.Take(sizeof(mdlHeader_t));
+	if ( p == NULL ) {
+		common->Warning("InitFromFile: %s is too small", fileName);
+		return false;
+	}
+	memcpy(&h, p, sizeof(h));
+
+	LL(h.ident);
+	LL(h.version);
+	for ( i = 0; i < 3; i++ ) {
+		h.scale[i] = LittleFloat(h.scale[i]);
+		h.translate[i] = LittleFloat(h.translate[i]);
+	}
+	LL(h.numSkins);
+	LL(h.skinWidth);
+	LL(h.skinHeight);
+	LL(h.numVerts);
+	LL(h.numTris);
+	LL(h.numFrames);
+
+	if ( h.ident == MDL_IDENT_HL ) {
+		common->Warning("InitFromFile: %s is a Half-Life model (IDST), only Quake 1 (IDPO) models are supported", fileName);
+		return false;
+	}
+	if ( h.ident != MDL_IDENT ) {
+		common->Warning("InitFromFile: %s is not an MDL file (bad ident)", fileName);
+		return false;
+	}
+	if ( h.version != MDL_VERSION ) {
+		common->Warning("InitFromFile: %s has wrong version (%i should be %i)", fileName, h.version, MDL_VERSION);
+		return false;
+	}
+	if ( h.numVerts < 1 || h.numVerts > MDL_MAX_VERTS ) {
+		common->Warning("InitFromFile: %s has a bad vertex count (%i, max %i)", fileName, h.numVerts, MDL_MAX_VERTS);
+		return false;
+	}
+	if ( h.numTris < 1 || h.numTris > MDL_MAX_TRIANGLES ) {
+		common->Warning("InitFromFile: %s has a bad triangle count (%i, max %i)", fileName, h.numTris, MDL_MAX_TRIANGLES);
+		return false;
+	}
+	if ( h.numFrames < 1 || h.numFrames > MDL_MAX_FRAMES ) {
+		common->Warning("InitFromFile: %s has a bad frame count (%i, max %i)", fileName, h.numFrames, MDL_MAX_FRAMES);
+		return false;
+	}
+	if ( h.numSkins < 0 || h.numSkins > MDL_MAX_SKINS ) {
+		common->Warning("InitFromFile: %s has a bad skin count (%i)", fileName, h.numSkins);
+		return false;
+	}
+	if ( h.skinWidth < 1 || h.skinWidth > MDL_MAX_SKIN_SIZE || h.skinHeight < 1 || h.skinHeight > MDL_MAX_SKIN_SIZE ) {
+		common->Warning("InitFromFile: %s has a bad skin size (%i x %i)", fileName, h.skinWidth, h.skinHeight);
+		return false;
+	}
+
+	const long long skinBytes = (long long)h.skinWidth * h.skinHeight;
+
+	// skins: only skipped, they are palette indexed and we have no palette
+	for ( i = 0; i < h.numSkins; i++ ) {
+		const int type = r.ReadInt();
+		if ( type == 0 ) {
+			r.Skip(skinBytes);
+		} else {
+			const int n = r.ReadInt();
+			if ( n < 1 || n > MDL_MAX_GROUP ) {
+				r.ok = false;
+				break;
+			}
+			r.Skip((long long)n * 4);	// intervals
+			r.Skip((long long)n * skinBytes);
+		}
+		if ( !r.ok ) {
+			break;
+		}
+	}
+	if ( !r.ok ) {
+		common->Warning("InitFromFile: %s has truncated or bad skin data", fileName);
+		return false;
+	}
+
+	// texture coordinates
+	stData.SetNum(h.numVerts * 3);
+	for ( i = 0; i < h.numVerts * 3; i++ ) {
+		stData[i] = r.ReadInt();
+	}
+	// triangles
+	triData.SetNum(h.numTris * 4);
+	for ( i = 0; i < h.numTris; i++ ) {
+		for ( j = 0; j < 4; j++ ) {
+			triData[i * 4 + j] = r.ReadInt();
+		}
+		for ( j = 1; j < 4; j++ ) {
+			if (triData[i * 4 + j] < 0 || triData[i * 4 + j] >= h.numVerts) {
+				common->Warning("InitFromFile: %s has an out of range vertex index in triangle %i", fileName, i);
+				return false;
+			}
+		}
+	}
+	if ( !r.ok ) {
+		common->Warning("InitFromFile: %s has truncated texture coordinate or triangle data", fileName);
+		return false;
+	}
+
+	// frames, groups are flattened into plain frames
+	// Preallocate no more than the rest of the file can actually hold, a hostile
+	// header must not be able to make us allocate for frames that aren't there.
+	// (Frames inside groups can exceed numFrames, those grow the array below.)
+	const int bytesPerFrame = h.numVerts * (int)sizeof(mdlVertex_t) + 8 + 16;
+	const int framesInFile = (size - r.pos) / bytesPerFrame;
+	framePos.SetNum(((h.numFrames < framesInFile) ? h.numFrames : framesInFile) * h.numVerts * 3);
+	int frameCount = 0;
+	for ( i = 0; i < h.numFrames && r.ok; i++ ) {
+		const int type = r.ReadInt();
+		int inGroup = 1;
+
+		if ( type != 0 ) {
+			inGroup = r.ReadInt();
+			if ( inGroup < 1 || inGroup > MDL_MAX_GROUP ) {
+				r.ok = false;
+				break;
+			}
+			r.Skip(8);					// group bbox min / max
+			r.Skip((long long)inGroup * 4);	// intervals
+		}
+
+		for ( j = 0; j < inGroup && r.ok; j++ ) {
+			if ( frameCount >= MDL_MAX_FRAMES ) {
+				common->Warning("InitFromFile: %s has more than %i frames once groups are flattened", fileName, MDL_MAX_FRAMES);
+				return false;
+			}
+			r.Skip(8 + 16);	// bbox min / max, name
+			const byte* verts = r.Take((long long)h.numVerts * sizeof(mdlVertex_t));
+			if ( verts == NULL ) {
+				break;
+			}
+			// keep the 3 position bytes, drop the normal index
+			if ( frameCount >= framePos.Num() / (h.numVerts * 3) ) {
+				// more frames in groups than the header announced, grow
+				framePos.SetNum((frameCount + 1) * h.numVerts * 3);
+			}
+			byte* dst = framePos.Ptr() + frameCount * h.numVerts * 3;
+			for ( int v = 0; v < h.numVerts; v++ ) {
+				dst[v * 3 + 0] = verts[v * 4 + 0];
+				dst[v * 3 + 1] = verts[v * 4 + 1];
+				dst[v * 3 + 2] = verts[v * 4 + 2];
+			}
+			frameCount++;
+		}
+	}
+	if ( !r.ok || frameCount < 1 ) {
+		common->Warning("InitFromFile: %s has truncated or bad frame data", fileName);
+		return false;
+	}
+	framePos.SetNum(frameCount * h.numVerts * 3);
+
+	numXyz = h.numVerts;
+	numFrames = frameCount;
+	for ( i = 0; i < 3; i++ ) {
+		scale[i] = h.scale[i];
+		translate[i] = h.translate[i];
+	}
+	skinWidth = h.skinWidth;
+	skinHeight = h.skinHeight;
+	return true;
+}
+
+/*
+=================
+idRenderModelMDL::DecodeFrame
+
+Decodes the xyz positions of one frame (numXyz entries) into out
+=================
+*/
+void idRenderModelMDL::DecodeFrame( idVec3* out, int frame ) const {
+	const byte* v = framePos.Ptr() + frame * numXyz * 3;
+
+	for ( int i = 0; i < numXyz; i++, v += 3 ) {
+		out[i].x = v[0] * scale[0] + translate[0];
+		out[i].y = v[1] * scale[1] + translate[1];
+		out[i].z = v[2] * scale[2] + translate[2];
+	}
+}
+
+/*
+=================
+idRenderModelMDL::BuildMesh
+
+Quake draws a vertex with a shifted s coordinate when it is on the texture
+seam and used by a back facing triangle, so the unique vertices are
+(xyz index, shifted or not).  Fills vertXyz / vertSt and returns the triangle
+index list (degenerate triangles removed) in indexes.
+=================
+*/
+bool idRenderModelMDL::BuildMesh( const char* fileName, const idList<int>& stData, const idList<int>& triData, int skinWidth, int skinHeight, idList<int>& indexes ) {
+	idList<int> variant;		// 0 = plain, 1 = seam shifted, of each split vertex
+	idList<int> next;			// next split vertex with the same xyz
+	int* head = (int*)Mem_Alloc(numXyz * sizeof(int));	// first split vertex for each xyz
+	for ( int i = 0; i < numXyz; i++ ) {
+		head[i] = -1;
+	}
+
+	indexes.Clear();
+	vertXyz.Clear();
+
+	const int numTris = triData.Num() / 4;
+	for ( int t = 0; t < numTris; t++ ) {
+		const bool front = triData[t * 4 + 0] != 0;
+		int corner[3];
+
+		for ( int c = 0; c < 3; c++ ) {
+			const int xi = triData[t * 4 + 1 + c];
+			const int var = (!front && stData[xi * 3 + 0] != 0) ? 1 : 0;
+
+			int e = head[xi];
+			while ( e >= 0 && variant[e] != var ) {
+				e = next[e];
+			}
+			if ( e < 0 ) {
+				e = vertXyz.Num();
+				if ( e >= MDL_MAX_EXPANDED ) {
+					common->Warning("InitFromFile: %s has more than %i unique vertexes", fileName, MDL_MAX_EXPANDED);
+					Mem_Free(head);
+					return false;
+				}
+				vertXyz.Append(xi);
+				variant.Append(var);
+				next.Append(head[xi]);
+				head[xi] = e;
+			}
+			corner[c] = e;
+		}
+
+		// drop degenerate triangles
+		if ( corner[0] == corner[1] || corner[0] == corner[2] || corner[1] == corner[2] ) {
+			continue;
+		}
+#if MDL_FLIP_WINDING
+		indexes.Append(corner[0]);
+		indexes.Append(corner[2]);
+		indexes.Append(corner[1]);
+#else
+		indexes.Append(corner[0]);
+		indexes.Append(corner[1]);
+		indexes.Append(corner[2]);
+#endif
+	}
+	Mem_Free(head);
+
+	if ( indexes.Num() == 0 ) {
+		common->Warning("InitFromFile: %s has only degenerate triangles", fileName);
+		return false;
+	}
+
+	// texture coordinates, frame invariant
+	vertSt.SetNum(vertXyz.Num() * 2);
+	for ( int i = 0; i < vertXyz.Num(); i++ ) {
+		float s = (float)stData[vertXyz[i] * 3 + 1];
+		const float tc = (float)stData[vertXyz[i] * 3 + 2];
+		if ( variant[i] ) {
+			s += skinWidth * 0.5f;
+		}
+		vertSt[i * 2 + 0] = (s + 0.5f) / (float)skinWidth;
+		vertSt[i * 2 + 1] = (tc + 0.5f) / (float)skinHeight;
+	}
+
+	return true;
+}
+
+/*
+=================
+idRenderModelMDL::InitFromFile
+=================
+*/
+void idRenderModelMDL::InitFromFile( const char* fileName ) {
+	void* buffer = NULL;
+	int					size;
+	idList<int>			stData, triData, indexes;
+	int					skinWidth = 1, skinHeight = 1;
+
+	// make reloading safe
+	FreeData();
+
+	name = fileName;
+
+	size = fileSystem->ReadFile(fileName, &buffer, NULL);
+	if ( size <= (int)sizeof(mdlHeader_t) ) {
+		if (buffer != NULL) {
+			fileSystem->FreeFile(buffer);
+		}
+		// must make it a default model so failure can be detected elsewhere
+		MakeDefaultModel();
+		return;
+	}
+
+	const bool good = Parse((const byte*)buffer, size, fileName, stData, triData, skinWidth, skinHeight);
+	fileSystem->FreeFile(buffer);
+
+	if ( !good || !BuildMesh(fileName, stData, triData, skinWidth, skinHeight, indexes) ) {
+		// the model is a default model now
+		FreeData();
+		MakeDefaultModel();
+		return;
+	}
+	dataSize = framePos.Num() + vertXyz.Num() * (sizeof(int) + 2 * sizeof(float));
+
+	// MDL files have no skin names and their embedded skins are palette indexed,
+	// so the material is looked up by the model's own name without the extension,
+	// e.g. "progs/soldier.mdl" -> "progs/soldier"
+	idStr matName = fileName;
+	matName.StripFileExtension();
+	material = declManager->FindMaterial(matName.c_str());
+
+	// per frame bounds
+	idList<idVec3> positions;
+	positions.SetNum(numXyz);
+	frameBounds.SetNum(numFrames);
+	for ( int f = 0; f < numFrames; f++ ) {
+		DecodeFrame(positions.Ptr(), f);
+		frameBounds[f].Clear();
+		for ( int i = 0; i < numXyz; i++ ) {
+			frameBounds[f].AddPoint(positions[i]);
+		}
+	}
+
+	silInfo = BuildSilInfo(indexes);
+
+	// If this is only one frame generate the static model information to fix
+	// loading issues and allow physics generation (same as the MD3 loader)
+	if ( numFrames == 1 ) {
+		CreateSurfaces();
+	}
+
+	// idRenderModelStatic::InitFromFile() does this, without it IsLoaded()
+	// stays false after the first purge and the model gets reloaded on every lookup
+	purged = false;
+}
+
+/*
+=================
+idRenderModelMDL::IsDynamicModel
+=================
+*/
+dynamicModel_t idRenderModelMDL::IsDynamicModel() const {
+	// no frames if loading failed and this is a default model now
+	if ( numFrames <= 1 ) {
+		return DM_STATIC;
+	}
+	return DM_CACHED;
+}
+
+/*
+=================
+idRenderModelMDL::LerpMeshVertexes
+
+Appends the split vertexes for frame / oldframe to tri->verts
+=================
+*/
+void idRenderModelMDL::LerpMeshVertexes( srfTriangles_t* tri, const float backlerp, const int frame, const int oldframe ) const {
+	const int numSplit = vertXyz.Num();
+	const byte* newVerts = framePos.Ptr() + frame * numXyz * 3;
+
+	idDrawVert* out = tri->verts + tri->numVerts;
+
+	if ( backlerp == 0 ) {
+		//
+		// just copy the vertexes
+		//
+		for ( int v = 0; v < numSplit; v++, out++ ) {
+			const byte* nv = newVerts + vertXyz[v] * 3;
+			out->xyz.x = nv[0] * scale[0] + translate[0];
+			out->xyz.y = nv[1] * scale[1] + translate[1];
+			out->xyz.z = nv[2] * scale[2] + translate[2];
+		}
+	} else {
+		//
+		// interpolate and copy the vertexes
+		//
+		const byte* oldVerts = framePos.Ptr() + oldframe * numXyz * 3;
+		const float frontlerp = 1.0f - backlerp;
+
+		for ( int v = 0; v < numSplit; v++, out++ ) {
+			const byte* nv = newVerts + vertXyz[v] * 3;
+			const byte* ov = oldVerts + vertXyz[v] * 3;
+			for ( int k = 0; k < 3; k++ ) {
+				// scale and translate are shared by all frames, so lerp the bytes
+				out->xyz[k] = (ov[k] * backlerp + nv[k] * frontlerp) * scale[k] + translate[k];
+			}
+		}
+	}
+
+	tri->numVerts += numSplit;
+}
+
+/*
+=================
+idRenderModelMDL::FillSurface
+
+Fills an allocated (or reused) surface with the geometry for one frame.
+Shared by CreateSurfaces() and InstantiateDynamicModel().
+tri->verts must already be allocated for vertXyz.Num() verts.
+=================
+*/
+void idRenderModelMDL::FillSurface( srfTriangles_t* tri, float backlerp, int frame, int oldframe ) const {
+	// These flags and references must be (re)set after allocation or reuse.
+	// deformedSurface prevents silEdges, silIndexes, indexes (and more not used here)
+	// from being freed (they belong to silInfo which is freed in FreeData())
+	tri->deformedSurface = true;
+	tri->tangentsCalculated = false;
+	tri->facePlanesCalculated = false;
+	tri->numSilEdges = silInfo.numSilEdges;
+	tri->silEdges = silInfo.silEdges;
+	tri->silIndexes = silInfo.silIndexes;
+	tri->indexes = silInfo.indexes;
+	tri->numIndexes = silInfo.numIndexes;
+
+	// LerpMeshVertexes appends at tri->numVerts, so reset the logical
+	// vertex count while keeping the allocated vertex buffer.
+	tri->numVerts = 0;
+	tri->bounds.Clear();
+
+	LerpMeshVertexes(tri, backlerp, frame, oldframe);
+
+	// Texture coordinates are frame-invariant.  Reassigning them is cheap
+	// and also initialises newly allocated vertex buffers.
+	for ( int j = 0; j < vertXyz.Num(); j++ ) {
+		idDrawVert* stri = &tri->verts[j];
+		stri->st[0] = vertSt[j * 2 + 0];
+		stri->st[1] = vertSt[j * 2 + 1];
+	}
+
+	R_BoundTriSurf(tri);
+}
+
+/*
+=============
+idRenderModelMDL::CreateSurfaces
+
+Single frame models get real static surfaces (needed for physics / collision
+model generation).
+=============
+*/
+void idRenderModelMDL::CreateSurfaces() {
+	this->bounds.Clear();
+
+	srfTriangles_t* tri = R_AllocStaticTriSurf();
+	R_AllocStaticTriSurfVerts(tri, vertXyz.Num());
+
+	FillSurface(tri, 0.0f, 0, 0);
+
+	modelSurface_t surf;
+	surf.geometry = tri;
+	surf.shader = material;
+	surf.id = this->NumSurfaces();
+	this->AddSurface(surf);
+	this->bounds.AddPoint(tri->bounds[0]);
+	this->bounds.AddPoint(tri->bounds[1]);
+}
+
+/*
+=============
+idRenderModelMDL::InstantiateDynamicModel
+
+The per-entity snapshot (and the vertex allocation inside it) is kept between
+calls and only the animated vertex positions are rewritten.  The topology
+(indexes, sil edges) is shared with silInfo and never touched.
+Frame, last frame and backlerp come from the same shaderParms as the MD3 loader.
+Frame numbers count flattened frames, frame groups are expanded in file order.
+=============
+*/
+idRenderModel* idRenderModelMDL::InstantiateDynamicModel( const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel ) {
+	int				surfaceNum;
+	int				frame, oldframe;
+	float			backlerp;
+	idRenderModelStatic* staticModel;
+
+	if ( numFrames < 1 ) {
+		// failed to load, we are a default model and shouldn't get here
+		if (cachedModel) {
+			delete cachedModel;
+		}
+		return NULL;
+	}
+
+	frame = idMath::ClampInt(0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME]);
+	oldframe = idMath::ClampInt(0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
+	backlerp = idMath::ClampFloat(0.0f, 1.0f, ent->shaderParms[SHADERPARM_MD3_BACKLERP]);
+
+	if ( cachedModel && !r_useCachedDynamicModels.GetBool() ) {
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	// Do not accept snapshots generated by another model type
+	if ( cachedModel && idStr::Icmp(cachedModel->Name(), "_MDL_Snapshot_") != 0 ) {
+		delete cachedModel;
+		cachedModel = NULL;
+	}
+
+	if ( cachedModel ) {
+		assert(dynamic_cast<idRenderModelStatic*>(cachedModel) != NULL);
+		staticModel = static_cast<idRenderModelStatic*>(cachedModel);
+	} else {
+		staticModel = new idRenderModelStatic;
+		staticModel->InitEmpty("_MDL_Snapshot_");
+	}
+
+	staticModel->bounds.Clear();
+
+	// Surface IDs are stable for the lifetime of this model.  Keep the
+	// modelSurface_t and its vertex allocation in the per-entity snapshot.
+	modelSurface_t* surf;
+	if ( staticModel->FindSurfaceWithId(0, surfaceNum) ) {
+		surf = &staticModel->surfaces[surfaceNum];
+	} else {
+		modelSurface_t newSurf;
+		memset(&newSurf, 0, sizeof(newSurf));
+		newSurf.id = 0;
+		staticModel->AddSurface(newSurf);
+		if (!staticModel->FindSurfaceWithId(0, surfaceNum)) {
+			common->Error("MDL snapshot: failed to find newly-added surface");
+		}
+		surf = &staticModel->surfaces[surfaceNum];
+	}
+
+	// The vertex and index counts determine whether the existing triangle
+	// allocation can be reused.  The topology arrays are owned by this
+	// model's silInfo, not by the snapshot.
+	srfTriangles_t* tri = surf->geometry;
+	if ( tri && (tri->numVerts != vertXyz.Num() || tri->numIndexes != silInfo.numIndexes) ) {
+		R_FreeStaticTriSurf(tri);
+		surf->geometry = NULL;
+		tri = NULL;
+	}
+	if ( !tri ) {
+		tri = R_AllocStaticTriSurf();
+		R_AllocStaticTriSurfVerts(tri, vertXyz.Num());
+		surf->geometry = tri;
+	} else {
+		// Vertex positions are about to change.  Drop any cached GPU
+		// copy (ambient, shadow and index caches) while retaining the
+		// CPU-side vertex allocation.
+		R_FreeStaticTriSurfVertexCaches(tri);
+	}
+
+	surf->shader = material;
+
+	FillSurface(tri, backlerp, frame, oldframe);
+
+	staticModel->bounds.AddPoint(tri->bounds[0]);
+	staticModel->bounds.AddPoint(tri->bounds[1]);
+
+	return staticModel;
+}
+
+/*
+=====================
+idRenderModelMDL::Bounds
+=====================
+*/
+idBounds idRenderModelMDL::Bounds( const struct renderEntity_s* ent ) const {
+	idBounds		ret;
+
+	ret.Clear();
+
+	if ( !ent || numFrames < 1 || frameBounds.Num() == 0 ) {
+		// just give it the editor bounds
+		ret.AddPoint(idVec3(-10, -10, -10));
+		ret.AddPoint(idVec3(10, 10, 10));
+		return ret;
+	}
+
+	const int frameNum = idMath::ClampInt(0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_FRAME]);
+	const int oldFrameNum = idMath::ClampInt(0, numFrames - 1, ent->shaderParms[SHADERPARM_MD3_LASTFRAME]);
+
+	ret = frameBounds[frameNum];
+
+	// while interpolating the mesh is a blend of both frames
+	if ( oldFrameNum != frameNum && ent->shaderParms[SHADERPARM_MD3_BACKLERP] > 0.0f ) {
+		ret.AddBounds(frameBounds[oldFrameNum]);
+	}
+
+	return ret;
+}
+
+/*
+=====================
+idRenderModelMDL::BuildSilInfo
+
+Builds the silhouette edge connectivity used for stencil shadows.  The result
+owns its own copy of the index list.
+=====================
+*/
+silInfo_t idRenderModelMDL::BuildSilInfo( const idList<int>& indexes ) {
+	const int numSplit = vertXyz.Num();
+	silInfo_t ret = { 0 };
+
+	// positions of frame 0, expanded to the split vertexes.  Only .xyz is used by
+	// R_CreateSilIndexes() and R_IdentifySilEdges().
+	idList<idVec3> positions;
+	positions.SetNum(numXyz);
+	DecodeFrame(positions.Ptr(), 0);
+
+	bool onStack;
+	idDrawVert* verts = (idDrawVert*)Mem_MallocA(numSplit * sizeof(idDrawVert), onStack);
+	for ( int i = 0; i < numSplit; ++i ) {
+		verts[i].Clear();
+		verts[i].xyz = positions[vertXyz[i]];
+	}
+
+	srfTriangles_t tri;
+	memset(&tri, 0, sizeof(tri));
+
+	tri.verts = verts;
+	tri.numVerts = numSplit;
+	tri.numIndexes = indexes.Num();
+	R_AllocStaticTriSurfIndexes(&tri, tri.numIndexes);
+	for ( int i = 0; i < tri.numIndexes; i++ ) {
+		tri.indexes[i] = indexes[i];
+	}
+
+	R_CreateSilIndexes(&tri);	// allocates and sets tri.silIndexes
+	// if there's only one frame (no animation), the omitCoplanarEdges optimization can be used
+	// (otherwise it can't because edges that are coplanar in frame 0 may not be in another frame)
+	R_IdentifySilEdges(&tri, numFrames == 1);	// allocates and sets tri.silEdges
+
+	ret.numIndexes = tri.numIndexes;
+	ret.numSilEdges = tri.numSilEdges;
+	ret.indexes = tri.indexes;
+	ret.silIndexes = tri.silIndexes;
+	ret.silEdges = tri.silEdges;
+
+	Mem_FreeA(verts, onStack);
+
+	return ret;
 }
