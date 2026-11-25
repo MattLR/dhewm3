@@ -398,7 +398,9 @@ public:
 	virtual void				SetJoint(int index, int parentNum, idStr name);
 private:
 	bool						LoadMDMFile(void* buffer, int filesize);
-	bool						LoadMDXFile(void);
+	bool						LoadMDXFile(idStrList &anims);
+	bool						ParseCharacterFile(const char* fileName, idStr& meshName, idStr& animName);
+	bool						ParseAnimationFiles(const char* fileName, idList<idStr>& mdxFiles);
 	bool						WriteAnimToDisk(void);
 	void						CalcBones(idList<idJointMat>& boneData, int currentFrame) const;
 	void						RenderFramesToModel(idRenderModelStatic* staticModel, const struct viewDef_s* view, int scale, int frame, const renderEntity_t* ent2);
