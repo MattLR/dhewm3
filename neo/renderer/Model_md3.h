@@ -326,7 +326,6 @@ typedef char md2CheckFrameSize[(sizeof(md2Frame_t) == 40) ? 1 : -1];
 typedef char md2CheckTriSize[(sizeof(md2Triangle_t) == 12) ? 1 : -1];
 typedef char md2CheckVertSize[(sizeof(md2Vertex_t) == 4) ? 1 : -1];
 
-
 /*
 ========================================================================
 
@@ -366,6 +365,13 @@ nothing after the header is at a fixed offset and nothing is aligned):
 #define MDL_MAX_SKIN_SIZE	4096	// width / height
 #define MDL_MAX_GROUP		4096	// entries in one skin / frame group
 #define MDL_MAX_EXPANDED	65536	// unique (xyz, seam) pairs after splitting
+
+// Embedded skins are palette indexed.  They are converted with the Quake palette
+// (gfx/palette.lmp from pak0, it must be in the VFS) into generated images and materials.
+#define MDL_GENERATE_SKINS	1
+#define MDL_PALETTE_FILE	"gfx/palette.lmp"
+#define MDL_MAX_USED_SKINS	16		// skins (after flattening skin groups) that get a texture
+#define MDL_NEAREST_FILTER	0		// 1 for the crisp pixelated Quake look
 
 // 0 keeps the file's triangle order (same as MD2/MD3).  Set to 1 if models
 // render inside out in your tree.
@@ -410,4 +416,5 @@ typedef char mdlCheckHeaderSize[(sizeof(mdlHeader_t) == 84) ? 1 : -1];
 typedef char mdlCheckStSize[(sizeof(mdlSt_t) == 12) ? 1 : -1];
 typedef char mdlCheckTriSize[(sizeof(mdlTriangle_t) == 16) ? 1 : -1];
 typedef char mdlCheckVertSize[(sizeof(mdlVertex_t) == 4) ? 1 : -1];
+
 #endif /* !__MODEL_MD3_H__ */

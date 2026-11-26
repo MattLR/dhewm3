@@ -2649,6 +2649,26 @@ silInfo_t idRenderModelMD2::BuildSilInfo( const idList<int>& indexes ) {
 	return ret;
 }
 
+/***********************************************************************
+
+	idRenderModelMDL
+
+	Quake 1 .mdl loader, derived from the MD2 loader (which is derived from
+	the MD3 loader): snapshot caching, stencil shadow info, validation.
+
+	Unlike MD2/MD3 the file isn't kept in memory.  Everything after the header
+	is variable length and unaligned, so the file is parsed once with bounds
+	checked reads into aligned arrays: the frame positions (3 bytes per vertex
+	per frame, frame groups flattened into plain frames) and the split mesh.
+
+	Embedded skins are palette indexed pixel data.  They are decoded with
+	gfx/palette.lmp into generated images ("mdlskin/<model>") with a generated
+	material each, unless an authored material with the model's name exists.
+
+***********************************************************************/
+
+#define	LL(x) x=LittleInt(x)
+
 /*
 =================
 mdlReader
@@ -2689,9 +2709,257 @@ struct mdlReader_t {
 
 /*
 =================
-idRenderModelMDL::idRenderModelMDL
+Generated skin images
+
+Images created from memory have to be able to regenerate themselves (vid_restart,
+level change purges), and the generator callback gets nothing but the idImage, so
+the decoded pixels are kept in a registry looked up by image name.
 =================
 */
+struct mdlSkinImage_t {
+	idStr				name;
+	int					width;
+	int					height;
+	idList<byte>		rgba;
+};
+static idList<mdlSkinImage_t>	mdlSkinImages;
+
+/*
+=================
+R_MDL_GetPalette
+
+The 768 byte Quake palette from gfx/palette.lmp.  If it isn't in the VFS a grey
+ramp is used so the model is at least visible, and a warning is printed once.
+=================
+*/
+static const byte* R_MDL_GetPalette() {
+	static byte palette[768];
+	static int state = 0;	// 0 = not tried, 1 = loaded, 2 = fallback
+
+	if ( state == 0 ) {
+		void* buf = NULL;
+		const int len = fileSystem->ReadFile(MDL_PALETTE_FILE, &buf, NULL);
+		if ( buf != NULL && len >= 768 ) {
+			memcpy(palette, buf, 768);
+			state = 1;
+		} else {
+			common->Warning("MDL: couldn't load %s, Quake models will be grey. Put the Quake palette in the VFS.", MDL_PALETTE_FILE);
+			for (int i = 0; i < 256; i++) {
+				palette[i * 3 + 0] = palette[i * 3 + 1] = palette[i * 3 + 2] = (byte)i;
+			}
+			state = 2;
+		}
+		if ( buf != NULL ) {
+			fileSystem->FreeFile(buf);
+		}
+	}
+	return palette;
+}
+
+/*
+=================
+R_MDL_SkinImageGenerator
+=================
+*/
+static void R_MDL_SkinImageGenerator( idImage* image ) {
+	for ( int i = 0; i < mdlSkinImages.Num(); i++ ) {
+		const mdlSkinImage_t& s = mdlSkinImages[i];
+		if ( idStr::Icmp(s.name.c_str(), image->imgName.c_str()) == 0 ) {
+			image->GenerateImage(s.rgba.Ptr(), s.width, s.height,
+#if MDL_NEAREST_FILTER
+				TF_NEAREST,
+#else
+				TF_DEFAULT,
+#endif
+				true, TR_REPEAT, TD_DIFFUSE);
+			return;
+		}
+	}
+	image->MakeDefault();
+}
+
+/*
+=================
+R_MDL_NextPow2
+=================
+*/
+static int R_MDL_NextPow2( int v ) {
+	int p = 1;
+	while ( p < v ) {
+		p <<= 1;
+	}
+	return p;
+}
+
+/*
+=================
+R_MDL_Resample
+
+Resamples an RGBA image.  The image system only accepts power of two sizes and Quake
+skins often aren't (e.g. 190x112).  Texture coordinates are normalized by the skin size
+in the file, so stretching the whole image keeps them valid, for the generated image
+as well as for an authored replacement of any size.
+Nearest keeps the hard Quake pixels, otherwise it is bilinear.
+=================
+*/
+static void R_MDL_Resample( const byte* in, int inW, int inH, byte* out, int outW, int outH, bool nearest ) {
+	for ( int y = 0; y < outH; y++ ) {
+		const float fy = (y + 0.5f) * inH / outH - 0.5f;
+		for ( int x = 0; x < outW; x++ ) {
+			const float fx = (x + 0.5f) * inW / outW - 0.5f;
+			byte* dst = out + (y * outW + x) * 4;
+
+			if ( nearest ) {
+				int sx = (int)(fx + 0.5f);
+				int sy = (int)(fy + 0.5f);
+				sx = sx < 0 ? 0 : (sx >= inW ? inW - 1 : sx);
+				sy = sy < 0 ? 0 : (sy >= inH ? inH - 1 : sy);
+				memcpy(dst, in + (sy * inW + sx) * 4, 4);
+				continue;
+			}
+
+			int x0 = (int)floorf(fx);
+			int y0 = (int)floorf(fy);
+			const float wx = fx - x0;
+			const float wy = fy - y0;
+			int x1 = x0 + 1;
+			int y1 = y0 + 1;
+			x0 = x0 < 0 ? 0 : (x0 >= inW ? inW - 1 : x0);
+			x1 = x1 < 0 ? 0 : (x1 >= inW ? inW - 1 : x1);
+			y0 = y0 < 0 ? 0 : (y0 >= inH ? inH - 1 : y0);
+			y1 = y1 < 0 ? 0 : (y1 >= inH ? inH - 1 : y1);
+
+			const byte* p00 = in + (y0 * inW + x0) * 4;
+			const byte* p10 = in + (y0 * inW + x1) * 4;
+			const byte* p01 = in + (y1 * inW + x0) * 4;
+			const byte* p11 = in + (y1 * inW + x1) * 4;
+			for ( int k = 0; k < 4; k++ ) {
+				const float top = p00[k] + (p10[k] - p00[k]) * wx;
+				const float bottom = p01[k] + (p11[k] - p01[k]) * wx;
+				dst[k] = (byte)(top + (bottom - top) * wy + 0.5f);
+			}
+		}
+	}
+}
+
+/*
+=================
+R_MDL_RegisterSkinImage
+
+Decodes palette indexes to RGBA, resamples to a power of two size and (re)registers
+them under name.  Palette index 255 is transparent, as in GLQuake.  Returns true if any pixel is transparent.
+=================
+*/
+static bool R_MDL_RegisterSkinImage( const char* name, int width, int height, const byte* indexes ) {
+	const byte* palette = R_MDL_GetPalette();
+	const int numPixels = width * height;
+	bool hasAlpha = false;
+
+	int slot = -1;
+	for ( int i = 0; i < mdlSkinImages.Num(); i++ ) {
+		if ( idStr::Icmp(mdlSkinImages[i].name.c_str(), name) == 0 ) {
+			slot = i;
+			break;
+		}
+	}
+	if ( slot < 0 ) {
+		mdlSkinImage_t blank;
+		blank.name = name;
+		blank.width = blank.height = 0;
+		mdlSkinImages.Append(blank);
+		slot = mdlSkinImages.Num() - 1;
+	}
+
+	mdlSkinImage_t& img = mdlSkinImages[slot];
+
+	// decode the palette indexes
+	idList<byte> decoded;
+	decoded.SetNum(numPixels * 4);
+	byte* dst = decoded.Ptr();
+	for ( int i = 0; i < numPixels; i++, dst += 4 ) {
+		const int idx = indexes[i];
+		dst[0] = palette[idx * 3 + 0];
+		dst[1] = palette[idx * 3 + 1];
+		dst[2] = palette[idx * 3 + 2];
+		dst[3] = (idx == 255) ? 0 : 255;
+		hasAlpha |= (idx == 255);
+	}
+
+	// the image system needs power of two sizes
+	const int potW = R_MDL_NextPow2(width);
+	const int potH = R_MDL_NextPow2(height);
+	img.width = potW;
+	img.height = potH;
+	img.rgba.SetNum(potW * potH * 4);
+	if ( potW == width && potH == height ) {
+		memcpy(img.rgba.Ptr(), decoded.Ptr(), numPixels * 4);
+	} else {
+#if MDL_NEAREST_FILTER
+		const bool nearest = true;
+#else
+		const bool nearest = false;
+#endif
+		R_MDL_Resample(decoded.Ptr(), width, height, img.rgba.Ptr(), potW, potH, nearest);
+	}
+	return hasAlpha;
+}
+
+/*
+=================
+idRenderModelMDL::BuildMaterial
+
+Returns the material for the model:
+ 1. an authored material named like the model ("progs/soldier") if one exists
+ 2. otherwise one generated from the embedded skin 0, with the same name
+ 3. otherwise the default material for that name
+Skin N (N > 0) of a model gets a generated "<name>_skinN" material, which a
+skin decl can remap to.  A generated material is a plain lit diffusemap, and
+perforated if the skin uses palette index 255.
+=================
+*/
+const idMaterial* idRenderModelMDL::BuildMaterial(const char* matName, int skinWidth, int skinHeight, const idList<byte>& skinData, int numSkinsLoaded) {
+	// authored materials always win, this is how mods replace the Quake skins
+	const idMaterial* authored = declManager->FindMaterial(matName, false);
+	if ( authored != NULL ) {
+		return authored;
+	}
+
+#if MDL_GENERATE_SKINS
+	const int skinBytes = skinWidth * skinHeight;
+	const idMaterial* first = NULL;
+
+	for ( int i = 0; i < numSkinsLoaded; i++ ) {
+		idStr skinName = matName;
+		if ( i > 0 ) {
+			skinName += va("_skin%i", i);
+		}
+		const idStr imageName = idStr("mdlskin/") + skinName;
+
+		const bool hasAlpha = R_MDL_RegisterSkinImage(imageName.c_str(), skinWidth, skinHeight, skinData.Ptr() + i * skinBytes);
+		globalImages->ImageFromFunction(imageName.c_str(), R_MDL_SkinImageGenerator);
+
+		if ( declManager->FindMaterial(skinName.c_str(), false) == NULL ) {
+			idDecl* decl = declManager->CreateNewDecl(DECL_MATERIAL, skinName.c_str(), "_mdl_generated.mtr");
+			if ( decl != NULL ) {
+				decl->SetText(va("{\n\t%s\n\tdiffusemap \"%s\"\n}\n", hasAlpha ? "perforated" : "", imageName.c_str()));
+				decl->Invalidate();
+			}
+		}
+
+		const idMaterial* mat = declManager->FindMaterial(skinName.c_str());
+		if ( i == 0 ) {
+			first = mat;
+		}
+	}
+	if ( first != NULL ) {
+		return first;
+	}
+#endif
+
+	// no skins in the file (or generation is off), the default material makes it visible
+	return declManager->FindMaterial(matName);
+}
+
 idRenderModelMDL::idRenderModelMDL() : dataSize(0), numXyz(0), numFrames(0), material(NULL) {
 	memset(&silInfo, 0, sizeof(silInfo));
 	scale[0] = scale[1] = scale[2] = 1.0f;
@@ -2743,7 +3011,7 @@ texture coordinate and triangle tables for BuildMesh().
 Returns false (after printing a warning) if the file can't be used.
 =================
 */
-bool idRenderModelMDL::Parse( const byte* data, int size, const char* fileName, idList<int>& stData, idList<int>& triData, int& skinWidth, int& skinHeight ) {
+bool idRenderModelMDL::Parse( const byte* data, int size, const char* fileName, idList<int>& stData, idList<int>& triData, int& skinWidth, int& skinHeight, idList<byte>& skinData, int& numSkinsLoaded ) {
 	mdlReader_t r(data, size);
 	mdlHeader_t h;
 	int i, j;
@@ -2803,22 +3071,30 @@ bool idRenderModelMDL::Parse( const byte* data, int size, const char* fileName, 
 
 	const long long skinBytes = (long long)h.skinWidth * h.skinHeight;
 
-	// skins: only skipped, they are palette indexed and we have no palette
-	for ( i = 0; i < h.numSkins; i++ ) {
+	// skins: palette indexed pixels, kept (up to MDL_MAX_USED_SKINS, groups flattened)
+	// to generate textures from
+	skinData.Clear();
+	numSkinsLoaded = 0;
+	for ( i = 0; i < h.numSkins && r.ok; i++ ) {
 		const int type = r.ReadInt();
-		if ( type == 0 ) {
-			r.Skip(skinBytes);
-		} else {
-			const int n = r.ReadInt();
-			if ( n < 1 || n > MDL_MAX_GROUP ) {
+		int inGroup = 1;
+
+		if ( type != 0 ) {
+			inGroup = r.ReadInt();
+			if ( inGroup < 1 || inGroup > MDL_MAX_GROUP ) {
 				r.ok = false;
 				break;
 			}
-			r.Skip((long long)n * 4);	// intervals
-			r.Skip((long long)n * skinBytes);
+			r.Skip((long long)inGroup * 4);	// intervals
 		}
-		if ( !r.ok ) {
-			break;
+		for ( j = 0; j < inGroup && r.ok; j++ ) {
+			const byte* pixels = r.Take(skinBytes);
+			if (pixels != NULL && numSkinsLoaded < MDL_MAX_USED_SKINS) {
+				const int base = skinData.Num();
+				skinData.SetNum(base + (int)skinBytes);
+				memcpy(skinData.Ptr() + base, pixels, (size_t)skinBytes);
+				numSkinsLoaded++;
+			}
 		}
 	}
 	if ( !r.ok ) {
@@ -2838,7 +3114,7 @@ bool idRenderModelMDL::Parse( const byte* data, int size, const char* fileName, 
 			triData[i * 4 + j] = r.ReadInt();
 		}
 		for ( j = 1; j < 4; j++ ) {
-			if (triData[i * 4 + j] < 0 || triData[i * 4 + j] >= h.numVerts) {
+			if ( triData[i * 4 + j] < 0 || triData[i * 4 + j] >= h.numVerts ) {
 				common->Warning("InitFromFile: %s has an out of range vertex index in triangle %i", fileName, i);
 				return false;
 			}
@@ -3023,7 +3299,8 @@ void idRenderModelMDL::InitFromFile( const char* fileName ) {
 	void* buffer = NULL;
 	int					size;
 	idList<int>			stData, triData, indexes;
-	int					skinWidth = 1, skinHeight = 1;
+	idList<byte>		skinData;
+	int					skinWidth = 1, skinHeight = 1, numSkinsLoaded = 0;
 
 	// make reloading safe
 	FreeData();
@@ -3032,7 +3309,7 @@ void idRenderModelMDL::InitFromFile( const char* fileName ) {
 
 	size = fileSystem->ReadFile(fileName, &buffer, NULL);
 	if ( size <= (int)sizeof(mdlHeader_t) ) {
-		if (buffer != NULL) {
+		if ( buffer != NULL ) {
 			fileSystem->FreeFile(buffer);
 		}
 		// must make it a default model so failure can be detected elsewhere
@@ -3040,7 +3317,7 @@ void idRenderModelMDL::InitFromFile( const char* fileName ) {
 		return;
 	}
 
-	const bool good = Parse((const byte*)buffer, size, fileName, stData, triData, skinWidth, skinHeight);
+	const bool good = Parse((const byte*)buffer, size, fileName, stData, triData, skinWidth, skinHeight, skinData, numSkinsLoaded);
 	fileSystem->FreeFile(buffer);
 
 	if ( !good || !BuildMesh(fileName, stData, triData, skinWidth, skinHeight, indexes) ) {
@@ -3051,12 +3328,13 @@ void idRenderModelMDL::InitFromFile( const char* fileName ) {
 	}
 	dataSize = framePos.Num() + vertXyz.Num() * (sizeof(int) + 2 * sizeof(float));
 
-	// MDL files have no skin names and their embedded skins are palette indexed,
-	// so the material is looked up by the model's own name without the extension,
-	// e.g. "progs/soldier.mdl" -> "progs/soldier"
+	// MDL files have no skin names, so the material is named after the model itself
+	// without the extension, e.g. "progs/soldier.mdl" -> "progs/soldier".  An authored
+	// material of that name is used if there is one, otherwise the embedded skin is
+	// turned into a material.
 	idStr matName = fileName;
 	matName.StripFileExtension();
-	material = declManager->FindMaterial(matName.c_str());
+	material = BuildMaterial(matName.c_str(), skinWidth, skinHeight, skinData, numSkinsLoaded);
 
 	// per frame bounds
 	idList<idVec3> positions;
@@ -3126,7 +3404,7 @@ void idRenderModelMDL::LerpMeshVertexes( srfTriangles_t* tri, const float backle
 		const byte* oldVerts = framePos.Ptr() + oldframe * numXyz * 3;
 		const float frontlerp = 1.0f - backlerp;
 
-		for ( int v = 0; v < numSplit; v++, out++ ) {
+		for  ( int v = 0; v < numSplit; v++, out++ ) {
 			const byte* nv = newVerts + vertXyz[v] * 3;
 			const byte* ov = oldVerts + vertXyz[v] * 3;
 			for ( int k = 0; k < 3; k++ ) {
@@ -3264,7 +3542,7 @@ idRenderModel* idRenderModelMDL::InstantiateDynamicModel( const struct renderEnt
 		memset(&newSurf, 0, sizeof(newSurf));
 		newSurf.id = 0;
 		staticModel->AddSurface(newSurf);
-		if (!staticModel->FindSurfaceWithId(0, surfaceNum)) {
+		if ( !staticModel->FindSurfaceWithId(0, surfaceNum) ) {
 			common->Error("MDL snapshot: failed to find newly-added surface");
 		}
 		surf = &staticModel->surfaces[surfaceNum];

@@ -362,12 +362,12 @@ public:
 
 private:
 	int							dataSize;		// just for listing purposes
-	struct md2Header_s* md2;			// swapped file data, owned
+	struct md2Header_s*			md2;			// swapped file data, owned
 
 	idList<int>					vertXyz;		// split vertex -> xyz index in the frames
 	idList<float>				vertSt;			// 2 floats per split vertex
 	silInfo_t					silInfo;		// single surface, owns its indexes
-	const idMaterial* material;		// from the first skin, may be NULL
+	const idMaterial*			material;		// from the first skin, may be NULL
 	idList<idBounds>			frameBounds;	// MD2 frames don't store bounds
 
 	void						FreeData();
@@ -385,7 +385,7 @@ public:
 
 	virtual void				InitFromFile(const char* fileName);
 	virtual dynamicModel_t		IsDynamicModel() const;
-	virtual idRenderModel* InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
+	virtual idRenderModel*		InstantiateDynamicModel(const struct renderEntity_s* ent, const struct viewDef_s* view, idRenderModel* cachedModel);
 	virtual idBounds			Bounds(const struct renderEntity_s* ent) const;
 
 private:
@@ -399,12 +399,13 @@ private:
 	idList<int>					vertXyz;		// split vertex -> xyz index
 	idList<float>				vertSt;			// 2 floats per split vertex
 	silInfo_t					silInfo;		// single surface, owns its indexes
-	const idMaterial* material;		// named after the model, may be the default material
+	const idMaterial*			material;		// authored or generated from skin 0, named after the model
 	idList<idBounds>			frameBounds;
 
 	void						FreeData();
-	bool						Parse(const byte* data, int size, const char* fileName, idList<int>& stData, idList<int>& triData, int& skinWidth, int& skinHeight);
+	bool						Parse(const byte* data, int size, const char* fileName, idList<int>& stData, idList<int>& triData, int& skinWidth, int& skinHeight, idList<byte>& skinData, int& numSkinsLoaded);
 	bool						BuildMesh(const char* fileName, const idList<int>& stData, const idList<int>& triData, int skinWidth, int skinHeight, idList<int>& indexes);
+	const idMaterial*			BuildMaterial(const char* matName, int skinWidth, int skinHeight, const idList<byte>& skinData, int numSkinsLoaded);
 	silInfo_t					BuildSilInfo(const idList<int>& indexes);
 	void						DecodeFrame(idVec3* out, int frame) const;
 	void						CreateSurfaces();
