@@ -33,6 +33,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "renderer/Model_local.h"
 #include "renderer/tr_local.h"	// just for R_FreeWorldInteractions and R_CreateWorldInteractions
 #include "renderer/Model_mds.h"
+#include "renderer/Model_skb.h"
 
 
 #include "renderer/ModelManager.h"
@@ -330,7 +331,7 @@ idRenderModel *idRenderModelManagerLocal::GetModel( const char *modelName, bool 
 		model = new idRenderModelTAN;
 		model->InitFromFile(modelName);
 	} else if ( extension.Icmp( "tik" ) == 0 ) {
-		model = new idRenderModelTAN;
+		model = new idRenderModelSKB;
 		model->InitFromFile( modelName );
 	} else if ( extension.Icmp( "prt" ) == 0  ) {
 		model = new idRenderModelPrt;

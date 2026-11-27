@@ -359,6 +359,16 @@ static void MatchAndAppendToken( idLexer &src, const char *match ) {
 	idStr::Append( parseBuffer, MAX_IMAGE_NAME, match );
 }
 
+// Dynamix
+// Reads one image-program token with '-' allowed inside names.
+// Only this token is affected, so ParseFloat etc. still see real numbers.
+static void R_ReadImageProgramToken(idLexer& src, idToken& token) {
+	int oldFlags = src.GetFlags();
+	src.SetFlags(oldFlags | LEXFL_ONLYSTRINGS);
+	src.ReadToken(&token);
+	src.SetFlags(oldFlags);
+}
+
 /*
 ===================
 R_ParseImageProgram_r
@@ -374,7 +384,9 @@ static bool R_ParseImageProgram_r( idLexer &src, byte **pic, int *width, int *he
 	float		scale;
 	ID_TIME_T		timestamp;
 
-	src.ReadToken( &token );
+	//src.ReadToken( &token );
+	// Dynamix, fix to allow image names to contain "-", very useful for Q3 porting
+	R_ReadImageProgramToken(src, token);
 	AppendToken( token );
 
 	if ( !token.Icmp( "heightmap" ) ) {

@@ -8,8 +8,6 @@
 #include "renderer/Model_sil.h"
 
 #include "renderer/Model_mdr.h"
-
-int		LittleLong(int l) { return l; }
 /*
 ========================
 rvmRenderModelMDR::rvmRenderModelMDR
@@ -1678,7 +1676,7 @@ bool idRenderModelMDX::LoadMDXFile(void* buffer, int filesize) {
 	size = LittleLong(pinmodel->ofsEnd);
 	//mds = mod->mds = ri.Hunk_Alloc(size, h_low);
 
-	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+	//memcpy(mds, buffer, LittleLong(pinmodel->ofsEnd));
 
 	if (size > filesize)
 	{
@@ -2599,7 +2597,7 @@ bool idRenderModelMDX::LoadMDXA(void* buffer, int filesize) {
 		animData = nullptr;
 	}
 
-	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+	//memcpy(mds, buffer, LittleLong(pinmodel->ofsEnd));
 
 	if (size > filesize)
 	{

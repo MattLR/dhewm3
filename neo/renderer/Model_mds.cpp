@@ -9,8 +9,6 @@
 
 #include "renderer/Model_mds.h"
 
-int		LittleLong2(int l) { return l; }
-
 /*
 ========================
 SanitizeJointName
@@ -151,17 +149,17 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 
 	pinmodel = (mdsHeader_t *)buffer;
 
-	//pinmodel->version = LittleLong2(pinmodel->version);
-	version = LittleLong2(pinmodel->version);
+	//pinmodel->version = LittleLong(pinmodel->version);
+	version = LittleLong(pinmodel->version);
 	if ( version != MDS_VERSION ) {
 		common->Warning("R_LoadMDS: %s has wrong version (%i should be %i)\n", mod_name, pinmodel->version, MDS_VERSION);
 		return false;
 	}
 
-	size = LittleLong2(pinmodel->ofsEnd);
+	size = LittleLong(pinmodel->ofsEnd);
 	//mds = mod->mds = ri.Hunk_Alloc(size, h_low);
 
-	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+	//memcpy(mds, buffer, LittleLong(pinmodel->ofsEnd));
 
 	if ( size > filesize ) {
 		common->Warning("R_LoadMDS: Header of %s is broken. Wrong filesize declared!\n", mod_name);
@@ -178,22 +176,22 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 	dataSize += size;
 	modelData = mds = (mdsHeader_t *)Mem_Alloc(size);
 
-	memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+	memcpy(mds, buffer, LittleLong(pinmodel->ofsEnd));
 
 	// Copy all the values over from the file and fix endian issues in the process, if necessary.
 
-	mds->ident = LittleLong2(pinmodel->ident);
+	mds->ident = LittleLong(pinmodel->ident);
 	mds->version = pinmodel->version;	// Don't need to swap byte order on this one, we already did above.
 	strcpy(mds->name, pinmodel->name);
 	mds->numFrames = pinmodel->numFrames;
 	mds->numBones = pinmodel->numBones;
-	mds->numTags = LittleLong2(pinmodel->numTags);
+	mds->numTags = LittleLong(pinmodel->numTags);
 	mds->numSurfaces = pinmodel->numSurfaces;
 	mds->ofsFrames = pinmodel->ofsFrames;
 	mds->ofsBones = pinmodel->ofsBones;
-	mds->ofsTags = LittleLong2(pinmodel->ofsTags);
-	mds->ofsEnd = LittleLong2(pinmodel->ofsEnd);
-	mds->ofsSurfaces = LittleLong2(pinmodel->ofsSurfaces);
+	mds->ofsTags = LittleLong(pinmodel->ofsTags);
+	mds->ofsEnd = LittleLong(pinmodel->ofsEnd);
+	mds->ofsSurfaces = LittleLong(pinmodel->ofsSurfaces);
 	
 	// We don't care about the other offset values, we'll generate them ourselves while loading.
 
@@ -202,7 +200,7 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 		return false;
 	}
 
-	if ( LittleLong2(1) != 1 ) {
+	if ( LittleLong(1) != 1 ) {
 		// swap all the frames
 		//frameSize = (int)( &((mdsFrame_t *)0)->bones[ mds->numBones ] );
 		frameSize = (int)(sizeof(mdsFrame_t) - sizeof(mdsBoneFrameCompressed_t) + mds->numBones * sizeof(mdsBoneFrameCompressed_t));
@@ -240,7 +238,7 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 	// swap all the surfaces
 	surf = (mdsSurface_t *)((byte *)mds + mds->ofsSurfaces);
 	for ( i = 0; i < mds->numSurfaces; i++ ) {
-		if ( LittleLong2(1) != 1 ) {
+		if ( LittleLong(1) != 1 ) {
 			LL(surf->ident);
 			LL(surf->shaderIndex);
 			LL(surf->minLod);
@@ -285,7 +283,7 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 		}
 		materials.Append(sh);
 
-		if ( LittleLong2(1) != 1 ) {
+		if ( LittleLong(1) != 1 ) {
 			// swap all the triangles
 			tri = (mdsTriangle_t*)((byte*)surf + surf->ofsTriangles);
 			for ( j = 0; j < surf->numTriangles; j++, tri++ ) {
@@ -304,10 +302,10 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 				v->texCoords[0] = LittleFloat(v->texCoords[0]);
 				v->texCoords[1] = LittleFloat(v->texCoords[1]);
 
-				v->numWeights = LittleLong2(v->numWeights);
+				v->numWeights = LittleLong(v->numWeights);
 
 				for  (k = 0; k < v->numWeights; k++ ) {
-					v->weights[k].boneIndex = LittleLong2(v->weights[k].boneIndex);
+					v->weights[k].boneIndex = LittleLong(v->weights[k].boneIndex);
 					v->weights[k].boneWeight = LittleFloat(v->weights[k].boneWeight);
 					v->weights[k].offset[0] = LittleFloat(v->weights[k].offset[0]);
 					v->weights[k].offset[1] = LittleFloat(v->weights[k].offset[1]);
@@ -320,13 +318,13 @@ bool idRenderModelMDS::LoadMDSFile( void *buffer, int filesize ) {
 			// swap the collapse map
 			collapseMap = (int *)((byte *)surf + surf->ofsCollapseMap);
 			for ( j = 0; j < surf->numVerts; j++, collapseMap++ ) {
-				*collapseMap = LittleLong2(*collapseMap);
+				*collapseMap = LittleLong(*collapseMap);
 			}
 
 			// swap the bone references
 			boneref = (int *)((byte *)surf + surf->ofsBoneReferences);
 			for ( j = 0; j < surf->numBoneReferences; j++, boneref++ ) {
-				*boneref = LittleLong2(*boneref);
+				*boneref = LittleLong(*boneref);
 			}
 		}
 
@@ -1185,17 +1183,17 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 
 	pinmodel = (mdmHeader_t *)buffer;
 
-	//pinmodel->version = LittleLong2(pinmodel->version);
-	version = LittleLong2(pinmodel->version);
+	//pinmodel->version = LittleLong(pinmodel->version);
+	version = LittleLong(pinmodel->version);
 	if ( version != MDM_VERSION ) {
 		common->Warning("R_LoadMDM: %s has wrong version (%i should be %i)\n", mod_name, pinmodel->version, MDM_VERSION);
 		return false;
 	}
 
-	size = LittleLong2(pinmodel->ofsEnd);
+	size = LittleLong(pinmodel->ofsEnd);
 	//mds = mod->mds = ri.Hunk_Alloc(size, h_low);
 
-	//memcpy(mds, buffer, LittleLong2(pinmodel->ofsEnd));
+	//memcpy(mds, buffer, LittleLong(pinmodel->ofsEnd));
 
 	if ( size > filesize ) {
 		common->Warning("R_LoadMDM: Header of %s is broken. Wrong filesize declared!\n", mod_name);
@@ -1208,22 +1206,22 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 	dataSize += size;
 	modelData = mdm = (mdmHeader_t*)Mem_Alloc(size);
 
-	memcpy(mdm, buffer, LittleLong2(pinmodel->ofsEnd));
+	memcpy(mdm, buffer, LittleLong(pinmodel->ofsEnd));
 
 	// Copy all the values over from the file and fix endian issues in the process, if necessary.
 
-	mdm->ident = LittleLong2(pinmodel->ident);
+	mdm->ident = LittleLong(pinmodel->ident);
 	mdm->version = pinmodel->version;	// Don't need to swap byte order on this one, we already did above.
 	strcpy(mdm->name, pinmodel->name);
-	mdm->numTags = LittleLong2(pinmodel->numTags);
+	mdm->numTags = LittleLong(pinmodel->numTags);
 	mdm->numSurfaces = pinmodel->numSurfaces;
-	mdm->ofsTags = LittleLong2(pinmodel->ofsTags);
-	mdm->ofsEnd = LittleLong2(pinmodel->ofsEnd);
-	mdm->ofsSurfaces = LittleLong2(pinmodel->ofsSurfaces);
+	mdm->ofsTags = LittleLong(pinmodel->ofsTags);
+	mdm->ofsEnd = LittleLong(pinmodel->ofsEnd);
+	mdm->ofsSurfaces = LittleLong(pinmodel->ofsSurfaces);
 
 	// We don't care about the other offset values, we'll generate them ourselves while loading.
 
-	if ( LittleLong2(1) != 1 ) {
+	if ( LittleLong(1) != 1 ) {
 
 		// swap all the tags
 		tag = (mdmTag_t *)((byte *)mdm + mdm->ofsTags);
@@ -1248,7 +1246,7 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 			// swap the bone references
 			boneref = (int*)((byte*)tag + tag->ofsBoneReferences);
 			for ( j = 0; j < tag->numBoneReferences; j++, boneref++ ) {
-				*boneref = LittleLong2(*boneref);
+				*boneref = LittleLong(*boneref);
 			}
 
 			// find the next tag
@@ -1259,7 +1257,7 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 	// swap all the surfaces
 	surf = (mdmSurface_t*)((byte*)mdm + mdm->ofsSurfaces);
 	for ( i = 0; i < mdm->numSurfaces; i++ ) {
-		if ( LittleLong2(1) != 1 ) {
+		if ( LittleLong(1) != 1 ) {
 			LL(surf->ident);
 			LL(surf->shaderIndex);
 			LL(surf->minLod);
@@ -1309,7 +1307,7 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 		}
 		materials.Append(sh);
 
-		if ( LittleLong2(1) != 1 ) {
+		if ( LittleLong(1) != 1 ) {
 			// swap all the triangles
 			tri = (mdmTriangle_t*)((byte*)surf + surf->ofsTriangles);
 			for ( j = 0; j < surf->numTriangles; j++, tri++ ) {
@@ -1328,10 +1326,10 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 				v->texCoords[0] = LittleFloat(v->texCoords[0]);
 				v->texCoords[1] = LittleFloat(v->texCoords[1]);
 
-				v->numWeights = LittleLong2(v->numWeights);
+				v->numWeights = LittleLong(v->numWeights);
 
 				for  (k = 0; k < v->numWeights; k++ ) {
-					v->weights[k].boneIndex = LittleLong2(v->weights[k].boneIndex);
+					v->weights[k].boneIndex = LittleLong(v->weights[k].boneIndex);
 					v->weights[k].boneWeight = LittleFloat(v->weights[k].boneWeight);
 					v->weights[k].offset[0] = LittleFloat(v->weights[k].offset[0]);
 					v->weights[k].offset[1] = LittleFloat(v->weights[k].offset[1]);
@@ -1344,13 +1342,13 @@ bool idRenderModelMDM::LoadMDMFile( void* buffer, int filesize ) {
 			// swap the collapse map
 			collapseMap = (int*)((byte*)surf + surf->ofsCollapseMap);
 			for ( j = 0; j < surf->numVerts; j++, collapseMap++ ) {
-				*collapseMap = LittleLong2(*collapseMap);
+				*collapseMap = LittleLong(*collapseMap);
 			}
 
 			// swap the bone references
 			boneref = (int *)((byte *)surf + surf->ofsBoneReferences);
 			for ( j = 0; j < surf->numBoneReferences; j++, boneref++ ) {
-				*boneref = LittleLong2(*boneref);
+				*boneref = LittleLong(*boneref);
 			}
 		}
 
@@ -1399,33 +1397,33 @@ bool idRenderModelMDM::LoadMDXFile( idStrList &anims ) {
 			return false;
 		}
 
-		if ( LittleLong2(pinmodel->ident) != MDX_IDENT ) {
+		if ( LittleLong(pinmodel->ident) != MDX_IDENT ) {
 			common->Warning("R_LoadMDX: %s is not an MDX file\n", mdxName.c_str());
 			fileSystem->FreeFile(buffer);
 			return false;
 		}
 
-		if ( LittleLong2(pinmodel->version) != MDX_VERSION ) {
+		if ( LittleLong(pinmodel->version) != MDX_VERSION ) {
 			common->Warning("R_LoadMDX: %s has wrong version (%i should be %i)\n", mdxName.c_str(), pinmodel->version, MDX_VERSION);
 			fileSystem->FreeFile(buffer);
 			return false;
 		}
 
-		size = LittleLong2(pinmodel->ofsEnd);
+		size = LittleLong(pinmodel->ofsEnd);
 		if ( size > filesize || size < (int)sizeof(mdxHeader_t) ) {
 			common->Warning("R_LoadMDX: Header of %s is broken. Wrong filesize declared!\n", mdxName.c_str());
 			fileSystem->FreeFile(buffer);
 			return false;
 		}
 
-		numBones = LittleLong2(pinmodel->numBones);
+		numBones = LittleLong(pinmodel->numBones);
 		if ( numBones < 1 || numBones > MDX_MAX_BONES ) {
 			common->Warning("R_LoadMDX: %s has %i bones (max %i)\n", mdxName.c_str(), numBones, MDX_MAX_BONES);
 			fileSystem->FreeFile(buffer);
 			return false;
 		}
 
-		numFrames = LittleLong2(pinmodel->numFrames);
+		numFrames = LittleLong(pinmodel->numFrames);
 		if ( numFrames < 1 ) {
 			common->Warning("R_LoadMDX: %s has no frames\n", mdxName.c_str());
 			fileSystem->FreeFile(buffer);
@@ -1434,8 +1432,8 @@ bool idRenderModelMDM::LoadMDXFile( idStrList &anims ) {
 
 		// Every frame is an mdxFrame_t followed by one compressed bone frame per bone
 		frameSize = (int)(sizeof(mdxFrame_t) + numBones * sizeof(mdxBoneFrameCompressed_t));
-		ofsFrames = LittleLong2(pinmodel->ofsFrames);
-		ofsBones = LittleLong2(pinmodel->ofsBones);
+		ofsFrames = LittleLong(pinmodel->ofsFrames);
+		ofsBones = LittleLong(pinmodel->ofsBones);
 
 		if ( ofsFrames < (int)sizeof(mdxHeader_t) || (long long)ofsFrames + (long long)numFrames * frameSize > size ||
 			ofsBones < (int)sizeof(mdxHeader_t) || (long long)ofsBones + (long long)numBones * (long long)sizeof(mdxBoneInfo_t) > size ) {
