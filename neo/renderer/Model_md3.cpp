@@ -2744,7 +2744,7 @@ static const byte* R_MDL_GetPalette() {
 			state = 1;
 		} else {
 			common->Warning("MDL: couldn't load %s, Quake models will be grey. Put the Quake palette in the VFS.", MDL_PALETTE_FILE);
-			for (int i = 0; i < 256; i++) {
+			for ( int i = 0; i < 256; i++ ) {
 				palette[i * 3 + 0] = palette[i * 3 + 1] = palette[i * 3 + 2] = (byte)i;
 			}
 			state = 2;
@@ -2906,18 +2906,45 @@ static bool R_MDL_RegisterSkinImage( const char* name, int width, int height, co
 
 /*
 =================
+R_MDL_ImageFileExists
+
+True if an image file with this name exists in the VFS (a mod's own replacement texture)
+=================
+*/
+static bool R_MDL_ImageFileExists( const char* name ) {
+	static const char* extensions[] = { ".tga", ".png", ".jpg" };
+
+	for ( int i = 0; i < 3; i++ ) {
+		const idStr path = idStr(name) + extensions[i];
+		if ( fileSystem->ReadFile(path.c_str(), NULL, NULL) != -1 ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+=================
 idRenderModelMDL::BuildMaterial
 
 Returns the material for the model:
  1. an authored material named like the model ("progs/soldier") if one exists
- 2. otherwise one generated from the embedded skin 0, with the same name
- 3. otherwise the default material for that name
-Skin N (N > 0) of a model gets a generated "<name>_skinN" material, which a
-skin decl can remap to.  A generated material is a plain lit diffusemap, and
-perforated if the skin uses palette index 255.
+ 2. otherwise, if an image file with that name exists, the implicit material for it
+ 3. otherwise one generated from the embedded skin 0, with the same name
+ 4. otherwise the default material for that name
+Skin N (N > 0) of a model gets a generated "<name>_skinN" material, which a skin
+decl can remap to.  A generated material is a plain lit diffusemap, and perforated
+if the skin uses palette index 255.
+
+The generated image has the same name as its material.  The material is created
+through the implicit material path (FindMaterial() on an unknown name), so it
+belongs to no source file.  CreateNewDecl() would attach it to a file that doesn't
+exist on disk, and reloadDecls then fails trying to re-read that file.  The implicit
+material's default text maps the image of the same name, which is why the image has
+to exist before the material is first looked up.
 =================
 */
-const idMaterial* idRenderModelMDL::BuildMaterial(const char* matName, int skinWidth, int skinHeight, const idList<byte>& skinData, int numSkinsLoaded) {
+const idMaterial* idRenderModelMDL::BuildMaterial( const char* matName, int skinWidth, int skinHeight, const idList<byte>& skinData, int numSkinsLoaded ) {
 	// authored materials always win, this is how mods replace the Quake skins
 	const idMaterial* authored = declManager->FindMaterial(matName, false);
 	if ( authored != NULL ) {
@@ -2933,20 +2960,29 @@ const idMaterial* idRenderModelMDL::BuildMaterial(const char* matName, int skinW
 		if ( i > 0 ) {
 			skinName += va("_skin%i", i);
 		}
-		const idStr imageName = idStr("mdlskin/") + skinName;
 
-		const bool hasAlpha = R_MDL_RegisterSkinImage(imageName.c_str(), skinWidth, skinHeight, skinData.Ptr() + i * skinBytes);
-		globalImages->ImageFromFunction(imageName.c_str(), R_MDL_SkinImageGenerator);
+		const idMaterial* mat;
 
-		if ( declManager->FindMaterial(skinName.c_str(), false) == NULL ) {
-			idDecl* decl = declManager->CreateNewDecl(DECL_MATERIAL, skinName.c_str(), "_mdl_generated.mtr");
-			if ( decl != NULL ) {
-				decl->SetText(va("{\n\t%s\n\tdiffusemap \"%s\"\n}\n", hasAlpha ? "perforated" : "", imageName.c_str()));
-				decl->Invalidate();
-			}
+		if ( R_MDL_ImageFileExists(skinName.c_str()) ) {
+			// a mod ships its own texture for this skin, the implicit material uses it
+			mat = declManager->FindMaterial(skinName.c_str());
+		} else {
+			const bool hasAlpha = R_MDL_RegisterSkinImage(skinName.c_str(), skinWidth, skinHeight, skinData.Ptr() + i * skinBytes);
+			globalImages->ImageFromFunction(skinName.c_str(), R_MDL_SkinImageGenerator);
+
+			// creates the implicit material (no source file) and parses its default text
+			mat = declManager->FindMaterial(skinName.c_str());
+
+			// replace the default text and force a reparse, SetText() alone doesn't mark the
+			// decl as unparsed so the material would stay on the default definition
+			idMaterial* editable = const_cast<idMaterial*>(mat);
+			editable->SetText(va("{\n\t%s\n\tdiffusemap \"%s\"\n}\n", hasAlpha ? "perforated" : "", skinName.c_str()));
+			editable->Invalidate();
+
+			// parse it now, that is what finds the image
+			mat = declManager->FindMaterial(skinName.c_str());
 		}
 
-		const idMaterial* mat = declManager->FindMaterial(skinName.c_str());
 		if ( i == 0 ) {
 			first = mat;
 		}
